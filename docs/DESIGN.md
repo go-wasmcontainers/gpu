@@ -33,7 +33,7 @@ The playground (browser) is the primary target; the native engine (wazero,
 | Frames to the dashboard | Engine worker renders to its own `OffscreenCanvas` (`getContext("webgpu")`), `transferToImageBitmap()` on `present`, posts the `ImageBitmap` (transferable) to the page; the dashboard draws it in a surface pane | `OffscreenCanvas` webgpu context: Chrome 144, Firefox 141 (partial, Windows), Safari 26; `transferToImageBitmap`: Chrome 69, Firefox 105, Safari 16.4 [bcd-oc]. Avoids a GPU→CPU readback. `transferControlToOffscreen` of a DOM canvas was rejected: the dashboard is one go-widgets canvas. |
 | Browser inference backend | **Ours**: the wasi-nn host runs ONNX graphs with its own operators, as WGSL compute kernels on the container's WebGPU device; the same operators in Go for the CPU | One codebase for both executors (the browser engine worker is Go too). Alternative kept: vendoring onnxruntime-web (MIT; no CDN needed, `env.wasm.wasmPaths` [ort-env]) — but its WebGPU build's wasm is 23.7 MB [ort-files] and it allocates on its own device, outside our quotas. WebNN is behind a flag in Chrome only, absent in Firefox and Safari [bcd-ml]: optional later. |
 | Native, `CGO_ENABLED=0` | **wasi-nn: pure-Go CPU backend** (our ONNX subset; kernels from go-simd where they exist). **wasi:webgpu: no adapter** (`request-adapter` returns `none`) at first | gonnx: opset 13 only, MPL-2.0, Gorgonia tensors in its API [gonnx]; onnx-go last pushed 2024-09. A pure-Go WebGPU exists: gogpu/wgpu, "Zero CGO", Metal/Vulkan/DX12/GLES through its own FFI, MIT, no stable release stated [gogpu]. Evaluated after (b); until then native says "no adapter", never a CPU result labelled GPU. |
-| Access control | **No GPU unless `wctr run --gpu`** (API: a field on the create request, to be named with the engine owner). Without it, `get-gpu` works but `request-adapter` returns `none`, and wasi-nn `load(target=gpu)` fails | Least privilege; a guest can test for the GPU portably. wasi-nn on CPU stays available, its memory counted against the container's limit. |
+| Access control | **No GPU unless `wctr run --gpu`** (API: `HostConfig.DeviceRequests` with capability `gpu`, the Docker Engine API's shape [moby-hc]). Without it, `get-gpu` works but `request-adapter` returns `none`, and wasi-nn `load(target=gpu)` fails | Least privilege; a guest can test for the GPU portably. wasi-nn on CPU stays available, its memory counted against the container's limit. |
 
 ## Quotas and security
 
@@ -96,11 +96,14 @@ and key events.
 
 ## Open risks
 
-- **R1 — `cabi_realloc` re-entry in Go guests.** A host calling a Go
-  `//go:wasmexport` function while that guest is inside a `//go:wasmimport`
-  call has not been verified; the Go runtime sources read so far do not settle
-  it. First measurement of phase 2(b). Fallback: our bindings pass a
-  guest-owned scratch buffer and avoid host-allocated results.
+- **R1 — `cabi_realloc` re-entry in Go guests: measured, works natively.**
+  A host can call a Go `//go:wasmexport cabi_realloc` while that guest is
+  inside a `//go:wasmimport` call (wazero v1.12.0, Go 1.27):
+  `internal/reentry` runs 2000 rounds with garbage collections in between and
+  the guest checks every byte; a mutated pattern makes the test fail. The
+  browser path (the guest worker calls the export from inside its import) is
+  the same re-entry at the wasm level and is tested once the engine seam
+  lands.
 - **R2 — CI cannot prove a GPU path.** Linux has no Firefox WebGPU [bcd-wn];
   what headless Chromium exposes on a GPU-less runner (likely a fallback
   adapter, `isFallbackAdapter` [webgpu-spec]) is to be measured. Tests will
@@ -152,5 +155,6 @@ Playwright Chromium and Firefox in the browser, a release, README and docs.
 - [ort-files] onnxruntime-web 1.23.0 file list (jsDelivr): https://data.jsdelivr.com/v1/packages/npm/onnxruntime-web@1.23.0?structure=flat
 - [gonnx] advancedclimatesystems/gonnx README: https://github.com/advancedclimatesystems/gonnx
 - [gogpu] gogpu/wgpu README: https://github.com/gogpu/wgpu
+- [moby-hc] moby `api/types/container/hostconfig.go` (`DeviceRequest`: Driver, Count, DeviceIDs, Capabilities, Options): https://github.com/moby/moby/blob/master/api/types/container/hostconfig.go
 - go-wasmcontainers/engine: `wasi/wasi.go`, `runtime/wazero/enginewasi.go`, `runtime/browser/worker.js`, `runtime/browser/executor_js.go` (v0.11.x)
 - go-wasmcontainers/playground and dashboard READMEs
