@@ -1,0 +1,3 @@
+cov.out
+cov.txt
+*.wasm
