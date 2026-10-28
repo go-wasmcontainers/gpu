@@ -9,3 +9,9 @@ import _ "embed"
 //
 //go:embed webgpu.wit
 var WebGPU string
+
+// Surface is this module's declaration of the wasi-gfx:surface@0.2.0
+// subset it serves (surface.wit: interfaces surface and surface-webgpu).
+//
+//go:embed surface.wit
+var Surface string

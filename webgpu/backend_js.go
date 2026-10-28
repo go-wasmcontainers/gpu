@@ -22,12 +22,99 @@ type Browser struct {
 	// destroyed (lost) rather than letting a container hold the GPU
 	// (default 2 s, the order of a driver watchdog).
 	GPUTime time.Duration
+	// OnSurface receives the surfaces' events: "open", "resize", "close",
+	// and "frame" (an ImageBitmap the receiver must transfer or close,
+	// with its sequence number). Nil drops frames (closing them). The
+	// page acknowledges drawn frames with AckFrame (docs/DESIGN.md,
+	// "Surfaces").
+	OnSurface func(SurfaceEvent)
+	// FrameInterval paces present (default 1/60 s): a surface never shows
+	// more than one frame per interval.
+	FrameInterval time.Duration
+	// MaxWidth and MaxHeight bound a surface (default 1920x1080).
+	MaxWidth, MaxHeight int
 }
+
+// SurfaceEvent is what OnSurface receives.
+type SurfaceEvent struct {
+	Op            string // "open", "resize", "close", "frame"
+	Surface       uint32
+	Width, Height int
+	Seq           uint64   // frames: from 1
+	Bitmap        js.Value // frames: an ImageBitmap
+}
+
+// MaxFramesInFlight is how many unacknowledged frames a surface may have
+// before present waits (at most AckWait) for AckFrame.
+const MaxFramesInFlight = 2
+
+// AckWait bounds one wait for acknowledgements: a page that stops
+// acknowledging slows a guest down to one frame per AckWait, never stops
+// it.
+const AckWait = time.Second
+
+var surfaces = struct {
+	sync.Mutex
+	n   uint32
+	all map[uint32]*surfaceObj
+}{all: map[uint32]*surfaceObj{}}
+
+// AckFrame records that frame seq of a surface was drawn or dropped.
+func AckFrame(surface uint32, seq uint64) {
+	surfaces.Lock()
+	sf := surfaces.all[surface]
+	surfaces.Unlock()
+	if sf == nil {
+		return
+	}
+	sf.mu.Lock()
+	if seq > sf.acked {
+		sf.acked = seq
+		close(sf.ackCh)
+		sf.ackCh = make(chan struct{})
+	}
+	sf.mu.Unlock()
+}
+
+// surfaceObj is a container's surface: an OffscreenCanvas in this worker.
+type surfaceObj struct {
+	id     uint32
+	canvas js.Value
+	last   time.Time
+	emit   func(SurfaceEvent)
+
+	mu    sync.Mutex
+	seq   uint64
+	acked uint64
+	ackCh chan struct{}
+}
+
+func (s *surfaceObj) Destroy() {
+	surfaces.Lock()
+	delete(surfaces.all, s.id)
+	surfaces.Unlock()
+	if s.emit != nil {
+		s.emit(SurfaceEvent{Op: "close", Surface: s.id})
+	}
+}
+
+type contextObj struct {
+	ctx js.Value
+	sf  *surfaceObj
+}
+
+func (c *contextObj) Destroy() {}
 
 // Open implements Backend.
 func (b Browser) Open(gpu bool, lim Limits, h *Handles) Session {
 	if b.GPUTime <= 0 {
 		b.GPUTime = 2 * time.Second
+	}
+	if b.FrameInterval <= 0 {
+		b.FrameInterval = time.Second / 60
+	}
+	if b.MaxWidth <= 0 || b.MaxHeight <= 0 {
+		b.MaxWidth, b.MaxHeight = 1920, 1080
 	}
 	return &session{b: b, gpu: gpu, lim: lim, h: h}
 }
@@ -51,6 +138,7 @@ var asyncCalls = map[string]bool{
 	"[method]gpu-queue.on-submitted-work-done":         true,
 	"[method]gpu-device.pop-error-scope":               true,
 	"[method]gpu-shader-module.get-compilation-info":   true,
+	"[method]context.present":                          true, // paced
 }
 
 func (s *session) Async(name string) bool { return asyncCalls[name] }
@@ -151,7 +239,11 @@ func (s *session) Call(name string, a []any) (any, error) {
 		}
 		return wit.Some{Value: h}, nil
 	case "[method]gpu.get-preferred-canvas-format":
-		return uint32(0), nil
+		f := "bgra8unorm"
+		if g := js.Global().Get("navigator").Get("gpu"); !g.IsUndefined() {
+			f = g.Call("getPreferredCanvasFormat").String()
+		}
+		return formatIndex(f), nil
 	case "[method]gpu.wgsl-language-features":
 		return s.h.New("wgsl-language-features", nil)
 	case "[method]wgsl-language-features.has":
@@ -419,6 +511,9 @@ func (s *session) Call(name string, a []any) (any, error) {
 		}
 		b.Call("unmap")
 		return okUnit, nil
+	}
+	if v, err, ok := s.render(name, a); ok {
+		return v, err
 	}
 	return nil, Trapf("%s is not implemented in this engine yet", name)
 }

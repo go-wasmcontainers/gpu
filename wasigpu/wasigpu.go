@@ -19,12 +19,48 @@ import (
 	"github.com/go-wasmcontainers/gpu/wit"
 )
 
-var iface = func() *wit.Interface {
-	ifs, err := wit.Parse(witdata.WebGPU)
+// The interfaces wasigpu imports, by ImportModule.
+const (
+	webgpuModule  = "wasi:webgpu/webgpu@0.3.0-rc.2"
+	surfaceModule = "wasi-gfx:surface/surface@0.2.0"
+	contextModule = "wasi-gfx:surface/surface-webgpu@0.2.0"
+)
+
+var webgpuIface *wit.Interface
+
+// enum is a WIT enum label's index (e.g. enum("gpu-load-op", "clear")).
+func enum(typ, label string) uint32 {
+	for i, l := range webgpuIface.Types[typ].Labels {
+		if l == label {
+			return uint32(i)
+		}
+	}
+	panic("wasigpu: no " + typ + " " + label)
+}
+
+// funcs maps "module name" (a calls key) to its WIT function.
+var funcs = func() map[string]*wit.Func {
+	w, err := wit.Parse(witdata.WebGPU)
 	if err != nil {
 		panic(err)
 	}
-	return ifs["webgpu"]
+	webgpuIface = w["webgpu"]
+	s, err := wit.ParseFiles([]*wit.Interface{w["webgpu"]}, witdata.Surface)
+	if err != nil {
+		panic(err)
+	}
+	out := map[string]*wit.Func{}
+	for _, i := range []*wit.Interface{w["webgpu"], s["surface"], s["surface-webgpu"]} {
+		for _, f := range i.Funcs {
+			out[i.ImportModule()+" "+f.ImportName("")] = f
+		}
+		for _, r := range i.ResourceNames() {
+			for _, f := range i.Resources[r].Funcs {
+				out[i.ImportModule()+" "+f.ImportName(r)] = f
+			}
+		}
+	}
+	return out
 }()
 
 // ErrUnavailable is returned outside GOOS=wasip1.
@@ -34,30 +70,17 @@ var ErrUnavailable = errors.New("wasi:webgpu: not available on this platform")
 // container was not started with --gpu).
 var ErrNoAdapter = errors.New("wasi:webgpu: no adapter")
 
-func lookup(name string) *wit.Func {
-	for _, f := range iface.Funcs {
-		if f.ImportName("") == name {
-			return f
-		}
-	}
-	for _, r := range iface.ResourceNames() {
-		for _, f := range iface.Resources[r].Funcs {
-			if f.ImportName(r) == name {
-				return f
-			}
-		}
-	}
-	return nil
-}
+// call runs a wasi:webgpu import.
+func call(name string, args ...any) (any, error) { return callIn(webgpuModule, name, args...) }
 
-// call runs an import with high-level arguments and returns its lifted
-// result.
-func call(name string, args ...any) (any, error) {
-	c, ok := calls[name]
+// callIn runs an import of a module with high-level arguments and returns
+// its lifted result.
+func callIn(module, name string, args ...any) (any, error) {
+	c, ok := calls[module+" "+name]
 	if !ok {
 		return nil, ErrUnavailable
 	}
-	f := lookup(name)
+	f := funcs[module+" "+name]
 	if f == nil {
 		return nil, fmt.Errorf("wasi:webgpu: no function %s", name)
 	}
@@ -97,8 +120,10 @@ func call(name string, args ...any) (any, error) {
 	return wit.LiftFlat(f.Result, []uint64{r}, mem)
 }
 
-func drop(res string, h uint32) {
-	if c, ok := calls["[resource-drop]"+res]; ok {
+func drop(res string, h uint32) { dropIn(webgpuModule, res, h) }
+
+func dropIn(module, res string, h uint32) {
+	if c, ok := calls[module+" [resource-drop]"+res]; ok {
 		c([]uint64{uint64(h)})
 	}
 }
@@ -154,6 +179,7 @@ const (
 // Device is a GPU device and its queue.
 type Device struct {
 	adapter, dev, queue uint32
+	format              uint32 // the preferred canvas format (gpu-texture-format)
 }
 
 // Open asks for an adapter and a device: ErrNoAdapter when the host has
@@ -173,6 +199,9 @@ func Open() (*Device, error) {
 		return nil, ErrNoAdapter
 	}
 	d := &Device{adapter: some.Value.(uint32)}
+	if f, err := call("[method]gpu.get-preferred-canvas-format", gpu); err == nil {
+		d.format, _ = f.(uint32)
+	}
 	v, err = unwrap("request-device")(call("[method]gpu-adapter.request-device", d.adapter, nil))
 	if err != nil {
 		drop("gpu-adapter", d.adapter)

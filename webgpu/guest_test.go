@@ -12,7 +12,6 @@ import (
 	"github.com/go-wasmcontainers/engine/rootfs"
 	"github.com/go-wasmcontainers/engine/runtime"
 	"github.com/go-wasmcontainers/engine/runtime/wazero"
-	"github.com/go-wasmcontainers/engine/wasi"
 )
 
 type syncBuf struct {
@@ -44,7 +43,7 @@ func TestComputeExampleWithoutGPU(t *testing.T) {
 	fsys := rootfs.New()
 	fsys.MkdirAll("/bin", 0o755)
 	fsys.WriteFile("/bin/compute.wasm", wasm, 0o755)
-	e := wazero.New(wazero.Options{HostModules: []wasi.HostModule{NewModule(nil)}})
+	e := wazero.New(wazero.Options{HostModules: HostModules(nil)})
 	defer e.Close(context.Background())
 	var so, se syncBuf
 	p, err := e.Start(context.Background(), runtime.Spec{FS: fsys, Path: "/bin/compute.wasm", Stdout: &so, Stderr: &se, Caps: []string{"gpu"}})

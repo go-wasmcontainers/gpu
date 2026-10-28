@@ -99,9 +99,36 @@ func main() {
 	}
 	nnMod := nn.NewModule()
 	nnMod.Backends = append(nnMod.Backends, nnwebgpu.Backend{Limits: onnx.DefaultLimits, AllowFallback: allow})
+	// Surfaces go to the page as the playground's engine worker sends them
+	// to the dashboard (docs/DESIGN.md, "Surfaces"); the page acknowledges
+	// the frames it drew.
+	onSurface := func(ev webgpu.SurfaceEvent) {
+		m := js.Global().Get("Object").New()
+		m.Set("t", "surface")
+		m.Set("op", ev.Op)
+		m.Set("surface", ev.Surface)
+		m.Set("width", ev.Width)
+		m.Set("height", ev.Height)
+		if ev.Op != "frame" {
+			js.Global().Call("postMessage", m)
+			return
+		}
+		m.Set("t", "frame")
+		m.Set("seq", float64(ev.Seq))
+		m.Set("bitmap", ev.Bitmap)
+		js.Global().Call("postMessage", m, []any{ev.Bitmap})
+	}
+	js.Global().Call("addEventListener", "message", js.FuncOf(func(_ js.Value, a []js.Value) any {
+		d := a[0].Get("data")
+		if d.Type() == js.TypeObject && d.Get("t").String() == "frame-ack" {
+			webgpu.AckFrame(uint32(d.Get("surface").Int()), uint64(d.Get("seq").Float()))
+		}
+		return nil
+	}))
+	mods := webgpu.HostModules(webgpu.Browser{AllowFallback: allow, OnSurface: onSurface})
 	exec := browser.New(browser.Options{
 		WorkerURL:   "container-worker.js",
-		HostModules: []wasi.HostModule{webgpu.NewModule(webgpu.Browser{AllowFallback: allow}), nnMod},
+		HostModules: append(mods, wasi.HostModule(nnMod)),
 	})
 	for _, c := range cases {
 		r := Result{Name: c.Name}

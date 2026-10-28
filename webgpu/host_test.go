@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-wasmcontainers/engine/rootfs"
 	"github.com/go-wasmcontainers/engine/wasi"
+	"github.com/go-wasmcontainers/gpu/wit"
 )
 
 type mem []byte
@@ -96,6 +97,42 @@ func TestNoGPU(t *testing.T) {
 		t.Error("a device call without a GPU did not trap")
 	}
 	_ = binary.LittleEndian
+}
+
+// TestSurfaceModules: the surface interfaces resolve their uses of
+// wasi:webgpu (a context's texture is a wasi:webgpu resource), the three
+// modules validate together, and they share one handle table per process.
+func TestSurfaceModules(t *testing.T) {
+	ctx := SurfaceInterfaces["surface-webgpu"].Resources["context"]
+	var tex *wit.Func
+	for _, f := range ctx.Funcs {
+		if f.Name == "get-current-texture" {
+			tex = f
+		}
+	}
+	if tex == nil || tex.Result.Kind != wit.Own || tex.Result.Name != "gpu-texture" || tex.Result.Owner != "wasi:webgpu/webgpu@0.3.0-rc.2" {
+		t.Fatalf("get-current-texture result %+v", tex)
+	}
+	if c := ctx.Funcs[0]; c.Kind != wit.Constructor || c.Params[0].Type.Kind != wit.Borrow || c.Params[0].Type.Owner != "wasi-gfx:surface/surface@0.2.0" {
+		t.Errorf("context constructor %+v", c.Params[0].Type)
+	}
+	mods := HostModules(nil)
+	if _, err := wasi.Imports(mods); err != nil {
+		t.Fatal(err)
+	}
+	p := wasi.New(wasi.Config{FS: rootfs.New()})
+	a, b := mods[0].Open(p).(*instance), mods[2].Open(p).(*instance)
+	if a.h != b.h {
+		t.Error("the modules of one process do not share a handle table")
+	}
+	a.Close()
+	if _, err := b.h.New("gpu", nil); err != nil {
+		t.Error("the table closed while a module still used it")
+	}
+	b.Close()
+	if b.h.Len() != 0 {
+		t.Error("the table outlived its last module")
+	}
 }
 
 func TestHandles(t *testing.T) {

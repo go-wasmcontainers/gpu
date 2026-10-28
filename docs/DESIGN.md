@@ -94,6 +94,35 @@ they come from the image's filesystem).
 bitmap primitive), shows "no GPU" / "device lost", and later forwards pointer
 and key events.
 
+### Surfaces: what the engine worker sends the page
+
+Implemented in (c) (`webgpu/backend_js.go`, `webgpu/render_js.go`). The host
+calls `Browser.OnSurface(SurfaceEvent)`; the playground's engine worker posts
+each event to the page, which hands it to the dashboard:
+
+| Event | Fields | When |
+|---|---|---|
+| `open` | surface, width, height | `[constructor]surface` |
+| `resize` | surface, width, height | `request-set-size` (a size past 1920×1080, or 0, traps) |
+| `frame` | surface, width, height, seq (1, 2, …), bitmap (`ImageBitmap`, transferred) | `context.present` |
+| `close` | surface | the surface is dropped or its process ends |
+
+The page draws a frame, closes the bitmap and answers
+`webgpu.AckFrame(surface, seq)` (in the engine test, a `frame-ack` message
+back to the worker). At most `MaxFramesInFlight` = 2 frames go
+unacknowledged; then `present` waits for an acknowledgement at most
+`AckWait` = 1 s, so a page that stops answering slows the guest to a frame per
+second and never blocks it. `present` is paced to `FrameInterval` (1/60 s).
+Surface ids are unique within the engine worker; container label and pid
+are to be added to the event once the engine's `wasi.Config.Label` is
+released (engine #28).
+
+The surface WIT (`webgpu/wit/surface.wit`) is **our own declaration** of
+the subset we serve, with the names and signatures of [gfx-surface] and
+[gfx-surface-webgpu]; no file was copied, because wasi-gfx/wasi-gfx
+publishes no licence (no LICENSE file, no licence in its README, checked
+before phase 2(c)). The input-event functions (`stream<…>`) are left out.
+
 ## Open risks
 
 - **R1 — `cabi_realloc` re-entry in Go guests: measured, works natively.**
@@ -134,7 +163,7 @@ Playwright Chromium and Firefox in the browser, a release, README and docs.
 - [gfx-readme] WebAssembly/wasi-gfx README (`wasi:webgpu`, Phase 2): https://github.com/WebAssembly/wasi-gfx
 - [gfx-wit] WebAssembly/wasi-gfx `wit/webgpu.wit`, `wasi:webgpu@0.3.0-rc.2`: https://github.com/WebAssembly/wasi-gfx/blob/main/wit/webgpu.wit
 - [gfx-org] wasi-gfx/wasi-gfx README (surface, frame-buffer; history): https://github.com/wasi-gfx/wasi-gfx
-- [gfx-surface] `packages/surface/wit/surface.wit`, `wasi-gfx:surface@0.2.0`
+- [gfx-surface] `packages/surface/wit/surface.wit`, `wasi-gfx:surface@0.2.0` (repository without a licence; our `webgpu/wit/surface.wit` declares the subset we serve, nothing copied)
 - [gfx-surface-webgpu] `packages/surface/wit/surface-webgpu.wit`
 - [gfx-fb] `packages/frame-buffer/wit/frame-buffer.wit`, `wasi-gfx:frame-buffer@0.2.0`
 - [cabi] Component Model, `design/mvp/CanonicalABI.md` (`MAX_FLAT_PARAMS = 16`, `MAX_FLAT_RESULTS = 1`): https://github.com/WebAssembly/component-model/blob/main/design/mvp/CanonicalABI.md

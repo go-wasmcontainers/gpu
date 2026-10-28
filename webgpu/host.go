@@ -30,6 +30,16 @@ var Interface = func() *wit.Interface {
 	return ifs["webgpu"]
 }()
 
+// SurfaceInterfaces are wasi-gfx:surface's surface and surface-webgpu, as
+// this module declares and serves them (webgpu/wit/surface.wit).
+var SurfaceInterfaces = func() map[string]*wit.Interface {
+	ifs, err := wit.ParseFiles([]*wit.Interface{Interface}, witdata.Surface)
+	if err != nil {
+		panic(err)
+	}
+	return ifs
+}()
+
 // export is one import the module serves.
 type export struct {
 	name     string // core import name
@@ -76,33 +86,95 @@ func (e *TrapError) Error() string { return "wasi:webgpu: " + e.Msg }
 // Trapf makes a TrapError.
 func Trapf(format string, a ...any) error { return &TrapError{fmt.Sprintf(format, a...)} }
 
-// Module is the wasi:webgpu host module.
+// Module is a host module serving one WIT interface: wasi:webgpu, or one
+// of wasi-gfx:surface's. The modules of one Backend share, per process,
+// one handle table and one session, so a texture a surface context
+// returns is a wasi:webgpu resource like any other.
 type Module struct {
 	Backend Backend
 	Limits  Limits
+	iface   *wit.Interface
 	exports []export
+	shared  *sharedState
 }
 
 // NewModule serves wasi:webgpu with a backend (nil: no GPU anywhere).
-func NewModule(b Backend) *Module {
+func NewModule(b Backend) *Module { return NewModules(b)[0] }
+
+// NewModules serves wasi:webgpu and wasi-gfx:surface (surface,
+// surface-webgpu) with one backend: register all three.
+func NewModules(b Backend) []*Module {
 	if b == nil {
 		b = noGPU{}
 	}
-	m := &Module{Backend: b, Limits: DefaultLimits}
-	for _, f := range Interface.Funcs {
-		m.exports = append(m.exports, export{name: f.ImportName(""), fn: f})
-	}
-	for _, r := range Interface.ResourceNames() {
-		for _, f := range Interface.Resources[r].Funcs {
-			m.exports = append(m.exports, export{name: f.ImportName(r), resource: r, fn: f})
+	sh := &sharedState{procs: map[*wasi.Proc]*procState{}}
+	var out []*Module
+	for _, i := range []*wit.Interface{Interface, SurfaceInterfaces["surface"], SurfaceInterfaces["surface-webgpu"]} {
+		m := &Module{Backend: b, Limits: DefaultLimits, iface: i, shared: sh}
+		for _, f := range i.Funcs {
+			m.exports = append(m.exports, export{name: f.ImportName(""), fn: f})
 		}
-		m.exports = append(m.exports, export{name: "[resource-drop]" + r, resource: r, drop: true})
+		for _, r := range i.ResourceNames() {
+			for _, f := range i.Resources[r].Funcs {
+				m.exports = append(m.exports, export{name: f.ImportName(r), resource: r, fn: f})
+			}
+			m.exports = append(m.exports, export{name: "[resource-drop]" + r, resource: r, drop: true})
+		}
+		out = append(out, m)
 	}
-	return m
+	return out
+}
+
+// HostModules is NewModules as the engine's host-module list.
+func HostModules(b Backend) []wasi.HostModule {
+	var out []wasi.HostModule
+	for _, m := range NewModules(b) {
+		out = append(out, m)
+	}
+	return out
+}
+
+// sharedState is a backend's per-process state, shared by its modules.
+type sharedState struct {
+	mu    sync.Mutex
+	procs map[*wasi.Proc]*procState
+}
+
+type procState struct {
+	h    *Handles
+	s    Session
+	refs int
+}
+
+func (sh *sharedState) acquire(p *wasi.Proc, m *Module) *procState {
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	ps := sh.procs[p]
+	if ps == nil {
+		h := newHandles(m.Limits.Handles)
+		ps = &procState{h: h, s: m.Backend.Open(p.HasCap("gpu"), m.Limits, h)}
+		sh.procs[p] = ps
+	}
+	ps.refs++
+	return ps
+}
+
+func (sh *sharedState) release(p *wasi.Proc, ps *procState) {
+	sh.mu.Lock()
+	ps.refs--
+	last := ps.refs == 0
+	if last {
+		delete(sh.procs, p)
+	}
+	sh.mu.Unlock()
+	if last {
+		ps.s.Close()
+		ps.h.closeAll()
+	}
 }
 
 // Module implements wasi.HostModule.
-func (m *Module) Module() string { return Interface.ImportModule() }
+func (m *Module) Module() string { return m.iface.ImportModule() }
 
 // Funcs implements wasi.HostModule: every function of the interface, with
 // its Canonical ABI core signature, and a drop per resource.
@@ -121,19 +193,21 @@ func (m *Module) Funcs() []wasi.HostFunc {
 
 // Open implements wasi.HostModule.
 func (m *Module) Open(p *wasi.Proc) wasi.Instance {
-	h := newHandles(m.Limits.Handles)
-	return &instance{m: m, h: h, s: m.Backend.Open(p.HasCap("gpu"), m.Limits, h)}
+	ps := m.shared.acquire(p, m)
+	return &instance{m: m, h: ps.h, s: ps.s, p: p, ps: ps}
 }
 
 type instance struct {
-	m *Module
-	h *Handles
-	s Session
+	m    *Module
+	h    *Handles
+	s    Session
+	p    *wasi.Proc
+	ps   *procState
+	once sync.Once
 }
 
 func (in *instance) Close() {
-	in.s.Close()
-	in.h.closeAll()
+	in.once.Do(func() { in.m.shared.release(in.p, in.ps) })
 }
 
 func trapResult(err error) wasi.Result { return wasi.Result{Trap: err.Error()} }
