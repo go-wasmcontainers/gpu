@@ -154,8 +154,10 @@ jobs:
         env:
           GPU_E2E_ALLOW_FALLBACK: ${{ matrix.fallback }}
         run: |
-          go test -tags e2e -count=1 -v -timeout 20m ./e2e/ > "$RUNNER_TEMP/e2e.log" 2>&1; status=$?
-          tail -60 "$RUNNER_TEMP/e2e.log"
+          # bash -e would exit at a failing go test before the log is shown.
+          status=0
+          go test -tags e2e -count=1 -v -timeout 20m ./e2e/ > "$RUNNER_TEMP/e2e.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/e2e.log"
           exit $status
 
   cross:
