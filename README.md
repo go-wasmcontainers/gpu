@@ -14,10 +14,34 @@ Design and references: [docs/DESIGN.md](docs/DESIGN.md).
 
 | Part | State |
 |---|---|
-| `onnx`: ONNX model loader and CPU operators | **done** — see below |
-| wasi-nn host module (`wasi_ephemeral_nn`) and guest bindings | next |
+| `onnx`: ONNX model loader and CPU operators | **done** (v0.1.0) — see below |
+| `nn`: wasi-nn host module (`wasi_ephemeral_nn`), CPU backend | **done** — see below |
+| `wasinn`: wasi-nn guest bindings for Go, `examples/mnist` | **done** |
+| wasi-nn GPU backend (WebGPU, browser) | next |
 | wasi:webgpu compute (browser) | planned |
 | rendering to a dashboard pane | planned |
+
+## wasi-nn: `nn` (host) and `wasinn` (guest)
+
+`nn.NewModule()` is a host module for the engine (v0.13.0+,
+`wazero.Options.HostModules` / `browser.Options.HostModules`) serving the
+preview 1 wasi-nn interface, `wasi_ephemeral_nn` (`load`, `load_by_name`,
+`init_execution_context`, `set_input`, `get_output`, `compute`), as
+Wasmtime and the `wasi-nn` crate's bindings lower it. A graph goes to the
+backend of its encoding (ONNX: the pure-Go CPU backend). The execution
+target is checked: `gpu` needs the container's `gpu` capability
+(`wctr run --gpu`) **and** a GPU backend, and otherwise fails with
+`unsupported_operation` — never runs on the CPU in its place. Model bytes,
+graphs and contexts per process, tensor rank and data are bounded;
+`FuzzHostCalls` drives arbitrary call sequences over arbitrary memory.
+
+`wasinn` gives Go guests (`GOOS=wasip1`) `Load`, `NewContext`,
+`SetInputF32`, `Compute`, `OutputF32`; elsewhere it builds and returns
+`ErrUnavailable`.
+
+[`examples/mnist`](examples/mnist) is a container that reads a handwritten
+digit: natively it classifies MNIST test pictures 0–3 (labels 7, 2, 1, 0)
+correctly, p = 1.000 for the embedded one.
 
 ## `onnx`
 

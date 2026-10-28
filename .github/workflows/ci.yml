@@ -64,6 +64,8 @@ jobs:
           # ONNX models and tensors come from containers.
           - { target: FuzzRun, pkg: ./onnx }
           - { target: FuzzDecodeTensor, pkg: ./onnx }
+          # wasi-nn calls: every argument and the memory are the guest's.
+          - { target: FuzzHostCalls, pkg: ./nn }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
