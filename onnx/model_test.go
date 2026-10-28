@@ -39,6 +39,26 @@ func runNodeTest2(t *testing.T, model, set string) error {
 	return allClose(out[s.Outputs()[0].Name], want)
 }
 
+// BenchmarkMNIST is one MNIST-12 inference on the CPU.
+func BenchmarkMNIST(b *testing.B) {
+	m, err := os.ReadFile("testdata/models/mnist-12/mnist-12.onnx")
+	if err != nil {
+		b.Fatal(err)
+	}
+	s, err := Load(m, DefaultLimits)
+	if err != nil {
+		b.Fatal(err)
+	}
+	x, _ := NewFloat([]int64{1, 1, 28, 28}, make([]float32, 28*28))
+	in := map[string]*Tensor{s.Inputs()[0].Name: x}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := s.Run(in); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // TestRefusesUnsupportedOperators: the error names every unsupported
 // operator with its node count, and the supported list.
 func TestRefusesUnsupportedOperators(t *testing.T) {
