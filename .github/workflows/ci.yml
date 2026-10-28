@@ -126,8 +126,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { lane: 'macos-latest, GPU', os: macos-latest, fallback: '0' }
-          - { lane: 'ubuntu, SwiftShader fallback', os: ubuntu-latest, fallback: '1' }
+          - { lane: 'macos-latest, GPU', os: macos-latest, fallback: '0', args: '' }
+          # Without Vulkan, Linux Chromium hands blank WebGPU canvas frames
+          # to transferToImageBitmap (seen on 143.0.7499.4).
+          - { lane: 'ubuntu, SwiftShader fallback', os: ubuntu-latest, fallback: '1', args: '--enable-features=Vulkan' }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -153,6 +155,7 @@ jobs:
         shell: bash
         env:
           GPU_E2E_ALLOW_FALLBACK: ${{ matrix.fallback }}
+          GPU_E2E_ARGS: ${{ matrix.args }}
         run: |
           # bash -e would exit at a failing go test before the log is shown.
           status=0

@@ -90,7 +90,7 @@ func (s *session) render(name string, a []any) (any, error, bool) {
 			return nil, err, true
 		}
 		if sf.emit != nil {
-			sf.emit(SurfaceEvent{Op: "open", Surface: sf.id, Width: w, Height: h})
+			sf.emit(SurfaceEvent{Op: "open", Surface: sf.id, Container: s.container, Width: w, Height: h})
 		}
 		return v, nil, true
 	case "[method]surface.height", "[method]surface.width":

@@ -8,8 +8,8 @@ github.com/go-jose/go-jose/v3 v3.0.5 h1:BLLJWbC4nMZOfuPVxoZIxeYsn6Nl2r1fITaJ78UQ
 github.com/go-jose/go-jose/v3 v3.0.5/go.mod h1:5b+7YgP7ZICgJDBdfjZaIt+H/9L9T/YQrVfLAMboGkQ=
 github.com/go-stack/stack v1.8.1 h1:ntEHSVwIt7PNXNpgPmVfMrNhLtgjlmnZha2kOpuRiDw=
 github.com/go-stack/stack v1.8.1/go.mod h1:dcoOX6HbPZSZptuspn9bctJ+N/CnF5gGygcUP3XYfe4=
-github.com/go-wasmcontainers/engine v0.13.0 h1:MNTwTHhOGH3tr8eGwYuvMiFIUAU331Nkba1sn79DjrU=
-github.com/go-wasmcontainers/engine v0.13.0/go.mod h1:m+Ns/3LiCpx6DUKVbEpwBT9qvTuTcTKqgF3+uwXn4NY=
+github.com/go-wasmcontainers/engine v0.19.0 h1:wQq7a6l1Y9SAnx1gl7GxRU8Gh6VCXXpSxmLkomj+F1k=
+github.com/go-wasmcontainers/engine v0.19.0/go.mod h1:m+Ns/3LiCpx6DUKVbEpwBT9qvTuTcTKqgF3+uwXn4NY=
 github.com/google/go-cmp v0.5.9/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=

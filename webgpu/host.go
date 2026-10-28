@@ -59,10 +59,16 @@ type Limits struct {
 // DefaultLimits are the per-process quotas.
 var DefaultLimits = Limits{Handles: 4096, MemoryBytes: 256 << 20, ShaderBytes: 1 << 20, Pipelines: 256}
 
+// Process is what a Backend knows of the process it serves.
+type Process struct {
+	GPU       bool   // the process has the gpu capability
+	Container string // its container's label (wasi.Config.Label), for surfaces
+}
+
 // Backend serves the functions for one process.
 type Backend interface {
-	// Open starts a process's session; gpu is its capability.
-	Open(gpu bool, lim Limits, h *Handles) Session
+	// Open starts a process's session.
+	Open(p Process, lim Limits, h *Handles) Session
 }
 
 // Session is one process's GPU state.
@@ -152,7 +158,7 @@ func (sh *sharedState) acquire(p *wasi.Proc, m *Module) *procState {
 	ps := sh.procs[p]
 	if ps == nil {
 		h := newHandles(m.Limits.Handles)
-		ps = &procState{h: h, s: m.Backend.Open(p.HasCap("gpu"), m.Limits, h)}
+		ps = &procState{h: h, s: m.Backend.Open(Process{GPU: p.HasCap("gpu"), Container: p.Label()}, m.Limits, h)}
 		sh.procs[p] = ps
 	}
 	ps.refs++
@@ -365,7 +371,7 @@ func (h *Handles) closeAll() {
 // request answers none.
 type noGPU struct{}
 
-func (noGPU) Open(_ bool, _ Limits, h *Handles) Session { return &noSession{h: h} }
+func (noGPU) Open(_ Process, _ Limits, h *Handles) Session { return &noSession{h: h} }
 
 type noSession struct{ h *Handles }
 

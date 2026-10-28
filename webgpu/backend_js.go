@@ -39,6 +39,7 @@ type Browser struct {
 type SurfaceEvent struct {
 	Op            string // "open", "resize", "close", "frame"
 	Surface       uint32
+	Container     string // open: the container's label (its ID), "" if unknown
 	Width, Height int
 	Seq           uint64   // frames: from 1
 	Bitmap        js.Value // frames: an ImageBitmap
@@ -106,7 +107,7 @@ type contextObj struct {
 func (c *contextObj) Destroy() {}
 
 // Open implements Backend.
-func (b Browser) Open(gpu bool, lim Limits, h *Handles) Session {
+func (b Browser) Open(p Process, lim Limits, h *Handles) Session {
 	if b.GPUTime <= 0 {
 		b.GPUTime = 2 * time.Second
 	}
@@ -116,14 +117,15 @@ func (b Browser) Open(gpu bool, lim Limits, h *Handles) Session {
 	if b.MaxWidth <= 0 || b.MaxHeight <= 0 {
 		b.MaxWidth, b.MaxHeight = 1920, 1080
 	}
-	return &session{b: b, gpu: gpu, lim: lim, h: h}
+	return &session{b: b, gpu: p.GPU, container: p.Container, lim: lim, h: h}
 }
 
 type session struct {
-	b   Browser
-	gpu bool
-	lim Limits
-	h   *Handles
+	b         Browser
+	gpu       bool
+	container string
+	lim       Limits
+	h         *Handles
 
 	mu        sync.Mutex
 	memory    int64 // buffer bytes alive

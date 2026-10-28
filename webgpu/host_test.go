@@ -135,6 +135,27 @@ func TestSurfaceModules(t *testing.T) {
 	}
 }
 
+type recordBackend struct{ got *[]Process }
+
+func (r recordBackend) Open(p Process, l Limits, h *Handles) Session {
+	*r.got = append(*r.got, p)
+	return noGPU{}.Open(p, l, h)
+}
+
+// TestBackendProcess: a backend opens once per process, with the gpu
+// capability and the container label the engine set.
+func TestBackendProcess(t *testing.T) {
+	var got []Process
+	mods := HostModules(recordBackend{&got})
+	p := wasi.New(wasi.Config{FS: rootfs.New(), Caps: []string{"gpu"}, Label: "c1"})
+	for _, m := range mods {
+		defer m.Open(p).Close()
+	}
+	if len(got) != 1 || got[0] != (Process{GPU: true, Container: "c1"}) {
+		t.Errorf("backend opened with %+v", got)
+	}
+}
+
 func TestHandles(t *testing.T) {
 	h := newHandles(2)
 	a, _ := h.New("gpu", nil)

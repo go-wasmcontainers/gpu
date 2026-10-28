@@ -107,6 +107,7 @@ func main() {
 		m.Set("t", "surface")
 		m.Set("op", ev.Op)
 		m.Set("surface", ev.Surface)
+		m.Set("container", ev.Container)
 		m.Set("width", ev.Width)
 		m.Set("height", ev.Height)
 		if ev.Op != "frame" {
@@ -142,7 +143,7 @@ func main() {
 		fsys.MkdirAll("/bin", 0o755)
 		fsys.WriteFile("/bin/guest.wasm", wasm, 0o755)
 		var so, se buf
-		spec := runtime.Spec{FS: fsys, Path: "/bin/guest.wasm", Args: append([]string{c.Name}, c.Args...), Stdout: &so, Stderr: &se,
+		spec := runtime.Spec{ID: "c-" + c.Name, FS: fsys, Path: "/bin/guest.wasm", Args: append([]string{c.Name}, c.Args...), Stdout: &so, Stderr: &se,
 			MemoryLimitBytes: 512 << 20, Timeout: 2 * time.Minute}
 		if c.GPU {
 			spec.Caps = []string{"gpu"}

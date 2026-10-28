@@ -52,7 +52,7 @@ window.__surfaces = {events: [], frames: []};
 w.onmessage = (e) => {
   const d = e.data;
   if (typeof d === "string") { window.__report = d; return; }
-  if (d.t === "surface") { window.__surfaces.events.push({op: d.op, surface: d.surface, width: d.width, height: d.height}); return; }
+  if (d.t === "surface") { window.__surfaces.events.push({op: d.op, surface: d.surface, container: d.container, width: d.width, height: d.height}); return; }
   if (d.t === "frame") {
     g.drawImage(d.bitmap, 0, 0);
     const px = (x, y) => Array.from(g.getImageData(x, y, 1, 1).data);
@@ -72,6 +72,7 @@ type surfaceLog struct {
 	Events []struct {
 		Op            string `json:"op"`
 		Surface       int    `json:"surface"`
+		Container     string `json:"container"`
 		Width, Height int
 	} `json:"events"`
 	Frames []struct {
@@ -165,6 +166,9 @@ func TestContainersOnWebGPU(t *testing.T) {
 		opts.Args = []string{"--enable-unsafe-webgpu"}
 		q = "?fallback=1"
 	}
+	// GPU_E2E_ARGS adds browser flags, e.g. --use-webgpu-adapter=swiftshader
+	// to reproduce the Linux lane on another machine.
+	opts.Args = append(opts.Args, strings.Fields(os.Getenv("GPU_E2E_ARGS"))...)
 	b, err := pw.Chromium.Launch(opts)
 	if err != nil {
 		t.Fatal(err)
@@ -252,7 +256,12 @@ func checkSurfaces(t *testing.T, p playwright.Page) {
 		ops = append(ops, e.Op)
 	}
 	if strings.Join(ops, ",") != "open,close" || s.Events[0].Width != 320 || s.Events[0].Height != 240 {
-		t.Errorf("surface events %+v", s.Events)
+		t.Fatalf("surface events %+v", s.Events)
+	}
+	// The open event names the container (the engine's wasi.Config.Label,
+	// set from runtime.Spec.ID).
+	if c := s.Events[0].Container; c != "c-triangle" {
+		t.Errorf("open event names container %q, want c-triangle", c)
 	}
 	if len(s.Frames) != 60 {
 		t.Fatalf("%d frames, want 60", len(s.Frames))

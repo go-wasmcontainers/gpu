@@ -102,7 +102,7 @@ each event to the page, which hands it to the dashboard:
 
 | Event | Fields | When |
 |---|---|---|
-| `open` | surface, width, height | `[constructor]surface` |
+| `open` | surface, container (its ID: the engine's `wasi.Config.Label`, v0.19.0), width, height | `[constructor]surface` |
 | `resize` | surface, width, height | `request-set-size` (a size past 1920×1080, or 0, traps) |
 | `frame` | surface, width, height, seq (1, 2, …), bitmap (`ImageBitmap`, transferred) | `context.present` |
 | `close` | surface | the surface is dropped or its process ends |
@@ -113,9 +113,9 @@ back to the worker). At most `MaxFramesInFlight` = 2 frames go
 unacknowledged; then `present` waits for an acknowledgement at most
 `AckWait` = 1 s, so a page that stops answering slows the guest to a frame per
 second and never blocks it. `present` is paced to `FrameInterval` (1/60 s).
-Surface ids are unique within the engine worker; container label and pid
-are to be added to the event once the engine's `wasi.Config.Label` is
-released (engine #28).
+Surface ids are unique within the engine worker; the `open` event names the
+container, so the dashboard can put the pane under it. A backend learns the
+container through `webgpu.Process{GPU, Container}`.
 
 The surface WIT (`webgpu/wit/surface.wit`) is **our own declaration** of
 the subset we serve, with the names and signatures of [gfx-surface] and

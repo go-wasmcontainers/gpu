@@ -63,7 +63,8 @@ per process: `wasi:webgpu/webgpu@0.3.0-rc.2`,
 `wasi-gfx:surface/surface@0.2.0` and `wasi-gfx:surface/surface-webgpu@0.2.0`
 (a guest using `wasigpu` imports all three). In the browser each surface
 is an `OffscreenCanvas` in the engine's worker; `present` turns it into an
-`ImageBitmap` handed to `Browser.OnSurface` with a sequence number, for the
+`ImageBitmap` handed to `Browser.OnSurface` with a sequence number (the
+`open` event names the container), for the
 page to draw (in the playground, a dashboard pane). The page acknowledges
 each frame (`webgpu.AckFrame`); at most 2 frames are unacknowledged
 (past that, `present` waits for an acknowledgement at most 1 s, so a page
