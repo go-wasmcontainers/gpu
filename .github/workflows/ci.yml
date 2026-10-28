@@ -111,6 +111,50 @@ jobs:
       - run: GOOS=${{ matrix.goos }} GOARCH=wasm CGO_ENABLED=0 go build ./...
       - run: GOOS=${{ matrix.goos }} GOARCH=wasm CGO_ENABLED=0 go vet ./...
 
+  # The WebGPU wasi-nn backend in a real browser worker, on the ONNX node
+  # tests and MNIST-12 (e2e/webgpu_test.go). The macOS lane must get a GPU
+  # adapter: a fallback (software) adapter fails it. The Linux lane runs the
+  # same WGSL on SwiftShader and says so: it proves the kernels, not a GPU.
+  webgpu:
+    name: WebGPU e2e (${{ matrix.lane }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { lane: 'macos-latest, GPU', os: macos-latest, fallback: '0' }
+          - { lane: 'ubuntu, SwiftShader fallback', os: ubuntu-latest, fallback: '1' }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version: '1.27.3' }
+      - uses: actions/setup-node@v7
+        with: { node-version: 22 }
+      - run: go version && node --version
+      - name: Playwright driver and Chromium
+        shell: bash
+        run: |
+          echo "PLAYWRIGHT_DRIVER_PATH=$RUNNER_TEMP/pwdriver" >> "$GITHUB_ENV"
+          echo "PLAYWRIGHT_NODEJS_PATH=$(command -v node)" >> "$GITHUB_ENV"
+          go run github.com/go-wasmcontainers/playground/cmd/site@v0.2.0 playwright-driver --dir "$RUNNER_TEMP/pwdriver"
+          PLAYWRIGHT_DRIVER_PATH="$RUNNER_TEMP/pwdriver" PLAYWRIGHT_NODEJS_PATH="$(command -v node)" \
+            go run github.com/playwright-community/playwright-go/cmd/playwright install --with-deps chromium
+      - name: the adapter this runner's browser offers
+        shell: bash
+        run: |
+          go run ./internal/cmd/gpuprobe --browser chromium --channel chromium > "$RUNNER_TEMP/probe.json"
+          cat "$RUNNER_TEMP/probe.json"
+          { echo '### WebGPU adapter (${{ matrix.lane }})'; echo '```json'; cat "$RUNNER_TEMP/probe.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: go test -tags e2e
+        shell: bash
+        env:
+          GPU_E2E_ALLOW_FALLBACK: ${{ matrix.fallback }}
+        run: |
+          go test -tags e2e -count=1 -v -timeout 20m ./e2e/ > "$RUNNER_TEMP/e2e.log" 2>&1; status=$?
+          tail -60 "$RUNNER_TEMP/e2e.log"
+          exit $status
+
   cross:
     name: cross ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest

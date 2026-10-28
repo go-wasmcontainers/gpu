@@ -141,7 +141,7 @@ func (*Module) Funcs() []wasi.HostFunc {
 
 // Open implements wasi.HostModule.
 func (m *Module) Open(p *wasi.Proc) wasi.Instance {
-	return &instance{m: m, gpu: p.HasCap("gpu"), graphs: map[uint32]Graph{}, ctxs: map[uint32]Context{}}
+	return &instance{m: m, gpu: p.HasCap("gpu"), graphs: map[uint32]Graph{}, ctxs: map[uint32]Context{}, async: map[uint32]bool{}}
 }
 
 type instance struct {
@@ -149,11 +149,40 @@ type instance struct {
 	gpu    bool
 	graphs map[uint32]Graph
 	ctxs   map[uint32]Context
+	async  map[uint32]bool // graphs and contexts of an AsyncBackend
 	next   uint32
 }
 
+// AsyncBackend is a backend whose calls wait on something outside the Go
+// program (WebGPU promises in the browser). Its load and compute run off
+// the host call, which returns a Wait, so the engine never blocks.
+type AsyncBackend interface {
+	Async() bool
+}
+
+func isAsync(b Backend) bool {
+	a, ok := b.(AsyncBackend)
+	return ok && a.Async()
+}
+
+// later runs f off the host call and resumes with then.
+func later(f func() Errno, then func(e Errno, m wasi.Memory) wasi.Result) wasi.Result {
+	done := make(chan struct{})
+	var e Errno
+	go func() {
+		e = f()
+		close(done)
+	}()
+	return wasi.Result{Wait: done, Resume: func(m wasi.Memory) wasi.Result { return then(e, m) }}
+}
+
 func (in *instance) Close() {
-	in.graphs, in.ctxs = nil, nil
+	for _, g := range in.graphs {
+		if c, ok := g.(interface{ Close() }); ok {
+			c.Close()
+		}
+	}
+	in.graphs, in.ctxs, in.async = nil, nil, nil
 }
 
 func r(e Errno) wasi.Result { return wasi.Result{Ret: uint64(e)} }
@@ -165,9 +194,9 @@ func (in *instance) Call(fn int, a []uint64, m wasi.Memory) wasi.Result {
 	u := func(i int) uint32 { return uint32(a[i]) }
 	switch fn {
 	case 0:
-		return r(in.load(u(0), u(1), u(2), u(3), u(4), m))
+		return in.load(u(0), u(1), u(2), u(3), u(4), m)
 	case 1:
-		return r(in.loadByName(u(0), u(1), u(2), m))
+		return in.loadByName(u(0), u(1), u(2), m)
 	case 2:
 		return r(in.initContext(u(0), u(1), m))
 	case 3:
@@ -175,9 +204,13 @@ func (in *instance) Call(fn int, a []uint64, m wasi.Memory) wasi.Result {
 	case 4:
 		return r(in.getOutput(u(0), u(1), u(2), u(3), u(4), m))
 	case 5:
-		c := in.ctxs[u(0)]
+		h := u(0)
+		c := in.ctxs[h]
 		if c == nil {
 			return r(InvalidArgument)
+		}
+		if in.async[h] {
+			return later(c.Compute, func(e Errno, _ wasi.Memory) wasi.Result { return r(e) })
 		}
 		return r(c.Compute())
 	}
@@ -196,13 +229,13 @@ func put32(m wasi.Memory, off, v uint32) bool {
 }
 
 // load reads a graph_builder_array: n (ptr, len) pairs at ptr.
-func (in *instance) load(ptr, n, enc, target, out uint32, m wasi.Memory) Errno {
+func (in *instance) load(ptr, n, enc, target, out uint32, m wasi.Memory) wasi.Result {
 	if n == 0 || n > 16 {
-		return InvalidArgument
+		return r(InvalidArgument)
 	}
 	pairs, ok := m.Read(ptr, n*8)
 	if !ok {
-		return InvalidArgument
+		return r(InvalidArgument)
 	}
 	pairs = append([]byte(nil), pairs...)
 	builders := make([][]byte, n)
@@ -210,11 +243,11 @@ func (in *instance) load(ptr, n, enc, target, out uint32, m wasi.Memory) Errno {
 	for i := range builders {
 		p, l := binary.LittleEndian.Uint32(pairs[i*8:]), binary.LittleEndian.Uint32(pairs[i*8+4:])
 		if int64(total)+int64(l) > int64(in.m.Limits.ModelBytes) {
-			return TooLarge
+			return r(TooLarge)
 		}
 		b, ok := m.Read(p, l)
 		if !ok {
-			return InvalidArgument
+			return r(InvalidArgument)
 		}
 		builders[i] = append([]byte(nil), b...)
 		total += int(l)
@@ -222,52 +255,84 @@ func (in *instance) load(ptr, n, enc, target, out uint32, m wasi.Memory) Errno {
 	return in.loadBuilders(builders, enc, target, out, m)
 }
 
-func (in *instance) loadBuilders(builders [][]byte, enc, target, out uint32, m wasi.Memory) Errno {
-	if target > TPU {
-		return InvalidArgument
-	}
-	if target == GPU && !in.gpu {
-		return UnsupportedOperation // the container was not started with --gpu
-	}
-	if len(in.graphs) >= in.m.Limits.Graphs {
-		return Busy
-	}
-	var be Backend
+// backendFor picks the first backend of the encoding that runs target:
+// InvalidEncoding when no backend reads it, UnsupportedOperation when
+// none of those runs there.
+func (in *instance) backendFor(enc, target uint32) (Backend, Errno) {
+	found := false
 	for _, b := range in.m.Backends {
-		if b.Encoding() == enc {
-			be = b
-			break
+		if b.Encoding() != enc {
+			continue
+		}
+		found = true
+		if b.Runs(target) {
+			return b, Success
 		}
 	}
-	if be == nil {
-		return InvalidEncoding
+	if !found {
+		return nil, InvalidEncoding
 	}
-	if !be.Runs(target) {
-		return UnsupportedOperation
-	}
-	g, e := be.Load(builders, target)
-	if e != Success {
-		return e
-	}
-	h := in.handle()
-	if !put32(m, out, h) {
-		return InvalidArgument
-	}
-	in.graphs[h] = g
-	return Success
+	return nil, UnsupportedOperation
 }
 
-func (in *instance) loadByName(ptr, n, out uint32, m wasi.Memory) Errno {
+func (in *instance) loadBuilders(builders [][]byte, enc, target, out uint32, m wasi.Memory) wasi.Result {
+	if target > TPU {
+		return r(InvalidArgument)
+	}
+	if target == GPU && !in.gpu {
+		return r(UnsupportedOperation) // the container was not started with --gpu
+	}
+	if len(in.graphs) >= in.m.Limits.Graphs {
+		return r(Busy)
+	}
+	be, e := in.backendFor(enc, target)
+	if e != Success {
+		return r(e)
+	}
+	var g Graph
+	finish := func(e Errno, m wasi.Memory) wasi.Result {
+		if e != Success {
+			return r(e)
+		}
+		if in.graphs == nil { // the process ended while the load ran
+			if c, ok := g.(interface{ Close() }); ok {
+				c.Close()
+			}
+			return r(RuntimeError)
+		}
+		h := in.handle()
+		if !put32(m, out, h) {
+			if c, ok := g.(interface{ Close() }); ok {
+				c.Close()
+			}
+			return r(InvalidArgument)
+		}
+		in.graphs[h] = g
+		in.async[h] = isAsync(be)
+		return r(Success)
+	}
+	do := func() Errno {
+		var e Errno
+		g, e = be.Load(builders, target)
+		return e
+	}
+	if isAsync(be) {
+		return later(do, finish)
+	}
+	return finish(do(), m)
+}
+
+func (in *instance) loadByName(ptr, n, out uint32, m wasi.Memory) wasi.Result {
 	if n > 1024 {
-		return InvalidArgument
+		return r(InvalidArgument)
 	}
 	b, ok := m.Read(ptr, n)
 	if !ok {
-		return InvalidArgument
+		return r(InvalidArgument)
 	}
 	named, ok := in.m.Named[string(b)]
 	if !ok {
-		return NotFound
+		return r(NotFound)
 	}
 	return in.loadBuilders(named.Builders, named.Encoding, CPU, out, m)
 }
@@ -289,6 +354,7 @@ func (in *instance) initContext(graph, out uint32, m wasi.Memory) Errno {
 		return InvalidArgument
 	}
 	in.ctxs[h] = c
+	in.async[h] = in.async[graph]
 	return Success
 }
 

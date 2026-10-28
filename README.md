@@ -15,10 +15,10 @@ Design and references: [docs/DESIGN.md](docs/DESIGN.md).
 | Part | State |
 |---|---|
 | `onnx`: ONNX model loader and CPU operators | **done** (v0.1.0) — see below |
-| `nn`: wasi-nn host module (`wasi_ephemeral_nn`), CPU backend | **done** — see below |
-| `wasinn`: wasi-nn guest bindings for Go, `examples/mnist` | **done** |
-| wasi-nn GPU backend (WebGPU, browser) | next |
-| wasi:webgpu compute (browser) | planned |
+| `nn`: wasi-nn host module (`wasi_ephemeral_nn`), CPU backend | **done** (v0.2.0) — see below |
+| `wasinn`: wasi-nn guest bindings for Go, `examples/mnist` | **done** (v0.2.0) |
+| `nn/webgpu`: wasi-nn GPU backend (WebGPU WGSL kernels, browser) | **done** — see below |
+| wasi:webgpu compute (browser) | next |
 | rendering to a dashboard pane | planned |
 
 ## wasi-nn: `nn` (host) and `wasinn` (guest)
@@ -42,6 +42,25 @@ graphs and contexts per process, tensor rank and data are bounded;
 [`examples/mnist`](examples/mnist) is a container that reads a handwritten
 digit: natively it classifies MNIST test pictures 0–3 (labels 7, 2, 1, 0)
 correctly, p = 1.000 for the embedded one.
+
+## wasi-nn on the GPU: `nn/webgpu`
+
+In the browser, `webgpu.NewModule()` adds a "gpu" backend to the CPU one:
+each ONNX node becomes one WGSL compute dispatch on a WebGPU device of the
+graph's own (in the engine's worker), shapes and constants coming from
+`onnx.Session.Plan` (a CPU dry run, so both executors agree on every shape
+by construction). Its calls wait on WebGPU promises, so `nn` runs them off
+the host call (`AsyncBackend`). A fallback (software) adapter is refused,
+and each graph's GPU memory is bounded (256 MiB).
+
+Checked twice: natively, `TestKernelsEmulated` runs each kernel's index
+arithmetic in Go on all 122 vendored ONNX node tests (no GPU needed, every
+platform); in a browser, `e2e/` runs the real WGSL on the same tests and
+MNIST-12 through Playwright. Measured on an Apple Metal adapter (Chromium
+143, new headless): **123/123 pass**, MNIST-12 within 3.1e-5 of the
+reference. The CI lanes: macOS (must get a GPU adapter, or fail) and Linux
+on SwiftShader (labelled fallback: proves the WGSL, not a GPU).
+`internal/cmd/gpuprobe` reports what adapter a browser offers.
 
 ## `onnx`
 
