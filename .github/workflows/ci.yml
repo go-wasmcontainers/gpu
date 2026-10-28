@@ -61,6 +61,9 @@ jobs:
       matrix:
         include:
           - { target: FuzzRealloc, pkg: ./internal/reentry }
+          # ONNX models and tensors come from containers.
+          - { target: FuzzRun, pkg: ./onnx }
+          - { target: FuzzDecodeTensor, pkg: ./onnx }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
