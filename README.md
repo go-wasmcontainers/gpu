@@ -17,9 +17,43 @@ Design and references: [docs/DESIGN.md](docs/DESIGN.md).
 | `onnx`: ONNX model loader and CPU operators | **done** (v0.1.0) — see below |
 | `nn`: wasi-nn host module (`wasi_ephemeral_nn`), CPU backend | **done** (v0.2.0) — see below |
 | `wasinn`: wasi-nn guest bindings for Go, `examples/mnist` | **done** (v0.2.0) |
-| `nn/webgpu`: wasi-nn GPU backend (WebGPU WGSL kernels, browser) | **done** — see below |
-| wasi:webgpu compute (browser) | next |
-| rendering to a dashboard pane | planned |
+| `nn/webgpu`: wasi-nn GPU backend (WebGPU WGSL kernels, browser) | **done** (v0.3.0) — see below |
+| `wit`, `webgpu`, `wasigpu`: wasi:webgpu compute (host and Go guest), `examples/compute` | **done** — see below |
+| rendering to a dashboard pane | next |
+
+## wasi:webgpu: `wit`, `webgpu` (host), `wasigpu` (guest)
+
+Containers are WASI preview 1 core modules, and the engine has no
+component-model runtime; `wasi:webgpu@0.3.0-rc.2` is WIT. So:
+
+- `wit` parses WIT and implements the **Canonical ABI** for a 32-bit
+  memory (alignment, sizes, flattening, loads, stores, flat lifting and
+  lowering; traps as errors), with the guest allocations of a result
+  planned first and applied once the guest's `cabi_realloc` gave them
+  (`FuzzLoad`).
+- `webgpu.NewModule(backend)` is a host module serving **every function
+  of the interface** (core names such as `[method]gpu-device.create-buffer`,
+  signatures from the WIT), resources as per-process handles. Asynchronous
+  functions (`request-adapter`, `map-async`, …) are lowered synchronously
+  and run off the host call. `webgpu.Browser{}` maps them to WebGPU in the
+  engine's worker; elsewhere there is no backend: `get-gpu` works and
+  `request-adapter` answers none. A process without `--gpu` gets no
+  adapter. Quotas per process: 4096 handles, 256 MiB of buffers, 1 MiB per
+  WGSL module, 256 pipelines (traps past them); a submission still running
+  after 2 s has its device destroyed; fallback adapters are refused.
+- `wasigpu` is the Go guest side (`GOOS=wasip1`), over the same `wit`
+  code; its imports are generated from the WIT by `internal/cmd/witgen`
+  (a test keeps them current).
+
+[`examples/compute`](examples/compute) adds two 1M-float vectors and
+multiplies two 256×256 matrices on the GPU, checking every element against
+the CPU. `e2e/engine_test.go` runs it — and `examples/mnist` on the CPU and
+on the GPU — as **real containers in the engine's browser executor**
+(Chromium, a Web Worker per container): on an Apple Metal adapter every
+element matches; matmul 15 ms on the GPU vs 42 ms on the guest's CPU, the
+vector add 69 ms vs 3.5 ms (dominated by transfers; one run, not a
+benchmark). Without `--gpu` the guest is told there is no adapter, and a
+fifth 64 MiB buffer traps on the memory quota.
 
 ## wasi-nn: `nn` (host) and `wasinn` (guest)
 
