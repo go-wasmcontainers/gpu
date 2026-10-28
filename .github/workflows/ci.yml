@@ -127,9 +127,7 @@ jobs:
       matrix:
         include:
           - { lane: 'macos-latest, GPU', os: macos-latest, fallback: '0', args: '' }
-          # Without Vulkan, Linux Chromium hands blank WebGPU canvas frames
-          # to transferToImageBitmap (seen on 143.0.7499.4).
-          - { lane: 'ubuntu, SwiftShader fallback', os: ubuntu-latest, fallback: '1', args: '--enable-features=Vulkan' }
+          - { lane: 'ubuntu, SwiftShader fallback', os: ubuntu-latest, fallback: '1', args: '' }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
