@@ -69,6 +69,22 @@ func (s *session) size(h, w any, defH, defW int) (int, int, error) {
 // render serves the surface and render functions; ok is false for a name
 // it does not know.
 func (s *session) render(name string, a []any) (any, error, bool) {
+	if kind := inputKind(name); kind != "" {
+		o, err := s.getObj(a[0], "surface")
+		if err != nil {
+			return nil, err, true
+		}
+		st, err := o.(*surfaceObj).input.openStream(kind)
+		if err != nil {
+			return nil, err, true
+		}
+		n, err := s.h.New("stream", st)
+		if err != nil {
+			st.Destroy()
+			return nil, err, true
+		}
+		return n, nil, true
+	}
 	switch name {
 	case "[constructor]surface":
 		r := record(a[0])

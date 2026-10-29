@@ -19,8 +19,9 @@ Design and references: [docs/DESIGN.md](docs/DESIGN.md).
 | `wasinn`: wasi-nn guest bindings for Go, `examples/mnist` | **done** (v0.2.0) |
 | `nn/webgpu`: wasi-nn GPU backend (WebGPU WGSL kernels, browser) | **done** (v0.3.0) — see below |
 | `wit`, `webgpu`, `wasigpu`: wasi:webgpu compute (host and Go guest), `examples/compute` | **done** (v0.4.0) — see below |
-| rendering: `wasi-gfx:surface` + `surface-webgpu`, frames to the page, `examples/triangle` | **done** — see below; the dashboard pane is the dashboard's part |
-| surface input events, vertex buffers, depth-stencil | not yet |
+| rendering: `wasi-gfx:surface` + `surface-webgpu`, frames to the page, `examples/triangle` | **done** (v0.5.0) — see below; the dashboard pane is the dashboard's part |
+| surface input: pointer and key streams (`stream<…>` and the Canonical ABI's stream and waitable-set built-ins) | **done** — see below; forwarding events from the pane is the dashboard's part |
+| `on-resize` / `on-frame` streams, vertex buffers, depth-stencil | not yet |
 
 ## wasi:webgpu: `wit`, `webgpu` (host), `wasigpu` (guest)
 
@@ -58,10 +59,11 @@ fifth 64 MiB buffer traps on the memory quota.
 
 ## Rendering: surfaces
 
-`webgpu.HostModules(backend)` serves three modules sharing one handle table
+`webgpu.HostModules(backend)` serves four modules sharing one handle table
 per process: `wasi:webgpu/webgpu@0.3.0-rc.2`,
-`wasi-gfx:surface/surface@0.2.0` and `wasi-gfx:surface/surface-webgpu@0.2.0`
-(a guest using `wasigpu` imports all three). In the browser each surface
+`wasi-gfx:surface/surface@0.2.0`, `wasi-gfx:surface/surface-webgpu@0.2.0`
+and `$root` (the waitable-set built-ins; a guest using `wasigpu` imports
+all four). In the browser each surface
 is an `OffscreenCanvas` in the engine's worker; `present` turns it into an
 `ImageBitmap` handed to `Browser.OnSurface` with a sequence number (the
 `open` event names the container), for the
@@ -71,8 +73,22 @@ each frame (`webgpu.AckFrame`); at most 2 frames are unacknowledged
 that stops acknowledging slows the guest to a frame per second without
 stopping it), frames are paced to 60
 per second, surfaces are at most 1920×1080. Render pipelines take their
-vertices from the shader (no vertex buffers yet) and have no depth-stencil;
-surface input events are not served yet.
+vertices from the shader (no vertex buffers yet) and have no depth-stencil.
+
+**Input.** A surface's `on-pointer-down`, `on-pointer-up`,
+`on-pointer-move`, `on-key-down` and `on-key-up` each return a
+`stream<pointer-event>` or `stream<key-event>` (UI Events key codes, the
+text the key produces, modifiers). A core module reads it with the
+Canonical ABI built-ins as wit-component names them:
+`[stream-read-0]…` (blocks until an event), `[async-lower][stream-read-0]…`
+(returns BLOCKED, completes through a waitable set), cancel-read,
+drop-readable, and `$root`'s `[waitable-set-new|poll|wait|drop]` and
+`[waitable-join]`. The page reports events on a pane with
+`webgpu.SurfaceInput(surface, InputEvent)`; each stream keeps at most 256
+undelivered events (the oldest dropped), a surface serves at most 64
+streams, coordinates must be finite and key text at most 64 bytes of
+UTF-8. Guest side: `(*Surface).Pointer(kind)` and `(*Surface).Keys(kind)`,
+whose `Poll` returns what arrived without blocking (once per frame).
 
 Guest side: `(*wasigpu.Device).Surface(w, h)`,
 `(*Surface).RenderPipeline(wgsl, vs, fs)` and `(*Surface).Frame(pipeline,
@@ -80,7 +96,9 @@ uniforms, clear, vertices)`. [`examples/triangle`](examples/triangle) draws
 a spinning triangle; `e2e/engine_test.go` runs it as a container on an Apple
 Metal adapter and checks, at the page, 60 frames in order, the clear colour
 in a corner, the triangle in the middle, frames that change, and a rate
-within the 60 per second pacing (one run: 51 frames per second).
+within the 60 per second pacing (one run: 51 frames per second); with
+`input`, the page clicks and types on the pane and the guest prints what it
+read (`pointer-down 10,20`, `key-down key-a "A" shift=true`).
 The same checks, pixels included, pass on the Linux SwiftShader lane.
 **Headless Linux Chromium** can back a WebGPU canvas only with Skia on
 Vulkan: launch it with `--enable-features=Vulkan --use-vulkan=swiftshader

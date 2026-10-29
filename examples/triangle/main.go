@@ -2,10 +2,11 @@
 // surface through wasi:webgpu and wasi-gfx:surface: in the playground the
 // surface is a pane of the dashboard. It draws a number of frames (120 by
 // default, or the first argument) and reports the rate the host paced it
-// to.
+// to; with "input" as the second argument it also prints the pointer
+// presses and keys the pane receives.
 //
 //	GOOS=wasip1 GOARCH=wasm go build -o triangle.wasm ./examples/triangle
-//	wctr run --gpu IMAGE [frames]
+//	wctr run --gpu IMAGE [frames [input]]
 package main
 
 import (
@@ -47,6 +48,7 @@ func main() {
 			frames = n
 		}
 	}
+	input := len(os.Args) > 2 && os.Args[2] == "input"
 	d, err := wasigpu.Open()
 	if errors.Is(err, wasigpu.ErrNoAdapter) {
 		fmt.Println("no GPU adapter")
@@ -71,9 +73,39 @@ func main() {
 		fail(err)
 	}
 	defer u.Drop()
+	// With "input", the pointer presses and keys on the surface's pane are
+	// printed as they arrive (read without blocking, once per frame).
+	var downs *wasigpu.PointerEvents
+	var keys *wasigpu.KeyEvents
+	if input {
+		if downs, err = s.Pointer(wasigpu.PointerDown); err != nil {
+			fail(err)
+		}
+		defer downs.Drop()
+		if keys, err = s.Keys(wasigpu.KeyDown); err != nil {
+			fail(err)
+		}
+		defer keys.Drop()
+	}
 	t0 := time.Now()
 	var b [16]byte
 	for f := 0; f < frames; f++ {
+		if input {
+			ps, err := downs.Poll()
+			if err != nil {
+				fail(err)
+			}
+			for _, p := range ps {
+				fmt.Printf("pointer-down %g,%g\n", p.X, p.Y)
+			}
+			ks, err := keys.Poll()
+			if err != nil {
+				fail(err)
+			}
+			for _, k := range ks {
+				fmt.Printf("key-down %s %q shift=%v\n", k.Key, k.Text, k.Shift)
+			}
+		}
 		binary.LittleEndian.PutUint32(b[:], math.Float32bits(float32(f)*0.05))
 		if err := d.Write(u, 0, b[:]); err != nil {
 			fail(err)

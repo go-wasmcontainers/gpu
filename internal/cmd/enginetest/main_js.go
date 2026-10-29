@@ -121,8 +121,31 @@ func main() {
 	}
 	js.Global().Call("addEventListener", "message", js.FuncOf(func(_ js.Value, a []js.Value) any {
 		d := a[0].Get("data")
-		if d.Type() == js.TypeObject && d.Get("t").String() == "frame-ack" {
+		if d.Type() != js.TypeObject {
+			return nil
+		}
+		switch d.Get("t").String() {
+		case "frame-ack":
 			webgpu.AckFrame(uint32(d.Get("surface").Int()), uint64(d.Get("seq").Float()))
+		case "input":
+			// The page's pointer and key events on a surface's pane
+			// (docs/DESIGN.md, "Surfaces"), as the dashboard sends them.
+			str := func(k string) string {
+				if v := d.Get(k); v.Type() == js.TypeString {
+					return v.String()
+				}
+				return ""
+			}
+			num := func(k string) float64 {
+				if v := d.Get(k); v.Type() == js.TypeNumber {
+					return v.Float()
+				}
+				return 0
+			}
+			webgpu.SurfaceInput(uint32(num("surface")), webgpu.InputEvent{
+				Kind: str("kind"), X: num("x"), Y: num("y"), Code: str("code"), Text: str("text"),
+				Alt: d.Get("alt").Truthy(), Ctrl: d.Get("ctrl").Truthy(), Meta: d.Get("meta").Truthy(), Shift: d.Get("shift").Truthy(),
+			})
 		}
 		return nil
 	}))

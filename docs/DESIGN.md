@@ -117,6 +117,42 @@ Surface ids are unique within the engine worker; the `open` event names the
 container, so the dashboard can put the pane under it. A backend learns the
 container through `webgpu.Process{GPU, Container}`.
 
+### Surface input: what the page sends the engine worker
+
+The pane forwards pointer and key events on a surface to the engine worker,
+which calls `webgpu.SurfaceInput(surface, webgpu.InputEvent{…})` (in the
+engine test, an `input` message):
+
+| Field | Pointer (`pointer-down`, `pointer-up`, `pointer-move`) | Key (`key-down`, `key-up`) |
+|---|---|---|
+| `kind` | the kind | the kind |
+| `surface` | the surface id of the `open` event | same |
+| `x`, `y` | surface pixels from the top-left (the pane scales from its own size); finite, at most 2¹⁶ in magnitude | — |
+| `code` | — | `KeyboardEvent.code` ("KeyA", "ArrowUp"); unknown codes become a key of none |
+| `text` | — | the text the key produces (`KeyboardEvent.key` when it is one character), "" for none; at most 64 bytes of UTF-8 |
+| `alt`, `ctrl`, `meta`, `shift` | — | the modifiers |
+
+Invalid events are dropped. Only the surface's own pane should send events
+for it (focus: keys go to the pane that has it). Pointer moves can be
+coalesced by the page (at most one per frame is useful); a stream keeps 256
+undelivered events and drops the oldest past that.
+
+The guest sees them as wasi-gfx:surface's `stream<pointer-event>` and
+`stream<key-event>` (our `surface.wit` declares upstream's names, records
+and the 171-label `key` enum in its order, checked against upstream). A
+core module reads a stream with the built-ins wit-component names
+(`[stream-read-0]<fn>`, `[async-lower][stream-read-0]<fn>`,
+`[stream-cancel-read-0]<fn>`, `[stream-drop-readable-0]<fn>` in the
+function's module; `[waitable-set-new|poll|wait|drop]`, `[waitable-join]`
+in `$root`) with the Canonical ABI's semantics [cabi]: a payload is
+`count << 4 | COMPLETED/DROPPED/CANCELLED`, an asynchronous read returns
+BLOCKED (`0xffffffff`) and completes as a `STREAM_READ` event. The host
+writes guest memory only inside a call, so an asynchronous read's elements
+are stored when the guest receives its event (the buffer is the guest's
+again only then). Lists are in package `wit` (`StreamBuiltins`,
+`WaitableBuiltins`), which host and guest share. A blocked read or wait is
+woken when the process ends.
+
 **Headless Linux Chromium needs Skia on Vulkan for a WebGPU canvas.**
 Found on the CI SwiftShader lane, where every frame was fully transparent:
 `gpuprobe --canvas` showed the same clear and readback correct without a
@@ -185,7 +221,8 @@ Playwright Chromium and Firefox in the browser, a release, README and docs.
 - [gfx-org] wasi-gfx/wasi-gfx README (surface, frame-buffer; history): https://github.com/wasi-gfx/wasi-gfx
 - [gfx-surface] `packages/surface/wit/surface.wit`, `wasi-gfx:surface@0.2.0` (repository without a licence; our `webgpu/wit/surface.wit` declares the subset we serve, nothing copied)
 - [gfx-surface-webgpu] `packages/surface/wit/surface-webgpu.wit`
-- [gfx-fb] `packages/frame-buffer/wit/frame-buffer.wit`, `wasi-gfx:frame-buffer@0.2.0`
+- [cm-streams] Component Model `design/mvp/CanonicalABI.md` (commit 519c0e9, 2026-10-28): `canon stream.read`, `copy`, `CopyResult`, `stream_event` packing, `EventCode`, `canon waitable-set.{new,wait,poll,drop}`, `canon waitable.join`, `BLOCKED`
+- [wc-names] wasm-tools `crates/wit-component/src/validation.rs` (`[stream-read-N]`, `[async-lower]`, `[waitable-set-*]`, `[waitable-join]` in `$root`) and `crates/wit-component/tests/components/async-streams-and-futures/module.wat`; `crates/wit-parser/src/lib.rs` `find_futures_and_streams` (the index N)- [gfx-fb] `packages/frame-buffer/wit/frame-buffer.wit`, `wasi-gfx:frame-buffer@0.2.0`
 - [cabi] Component Model, `design/mvp/CanonicalABI.md` (`MAX_FLAT_PARAMS = 16`, `MAX_FLAT_RESULTS = 1`): https://github.com/WebAssembly/component-model/blob/main/design/mvp/CanonicalABI.md
 - [cm-names] Component Model, `design/mvp/Explainer.md` (`[constructor]`, `[method]`, `[static]` names)
 - [cm-async] Component Model, `design/mvp/Concurrency.md` ("Blocking"; sync vs async lowered signatures)
