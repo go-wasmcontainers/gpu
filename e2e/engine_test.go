@@ -42,11 +42,48 @@ type engineReport struct {
 	Error string `json:"error"`
 }
 
-const enginePage = `<!doctype html><meta charset=utf-8><title>engine e2e</title><script>
+// enginePage plays the dashboard's part for surfaces: it draws each frame
+// into a canvas, samples it, closes the bitmap and acknowledges it.
+const enginePage = `<!doctype html><meta charset=utf-8><title>engine e2e</title>
+<canvas id=c width=320 height=240></canvas><script>
 const w = new Worker("engine.js" + location.search);
-w.onmessage = (e) => { window.__report = e.data; };
+const g = document.getElementById("c").getContext("2d", {willReadFrequently: true});
+window.__surfaces = {events: [], frames: []};
+w.onmessage = (e) => {
+  const d = e.data;
+  if (typeof d === "string") { window.__report = d; return; }
+  if (d.t === "surface") { window.__surfaces.events.push({op: d.op, surface: d.surface, container: d.container, width: d.width, height: d.height}); return; }
+  if (d.t === "frame") {
+    g.drawImage(d.bitmap, 0, 0);
+    const px = (x, y) => Array.from(g.getImageData(x, y, 1, 1).data);
+    const all = g.getImageData(0, 0, d.width, d.height).data;
+    let sum = 0;
+    for (let i = 0; i < all.length; i += 7) sum = (sum + all[i] * (i % 251)) >>> 0;
+    window.__surfaces.frames.push({seq: d.seq, t: performance.now(), w: d.width, h: d.height,
+      center: px(d.width >> 1, d.height >> 1), corner: px(2, 2), sum});
+    d.bitmap.close();
+    w.postMessage({t: "frame-ack", surface: d.surface, seq: d.seq});
+  }
+};
 w.onerror = (e) => { window.__report = JSON.stringify({error: "worker: " + e.message}); };
 </script>`
+
+type surfaceLog struct {
+	Events []struct {
+		Op            string `json:"op"`
+		Surface       int    `json:"surface"`
+		Container     string `json:"container"`
+		Width, Height int
+	} `json:"events"`
+	Frames []struct {
+		Seq    int     `json:"seq"`
+		T      float64 `json:"t"`
+		W, H   int
+		Center []int  `json:"center"`
+		Corner []int  `json:"corner"`
+		Sum    uint32 `json:"sum"`
+	} `json:"frames"`
+}
 
 const engineWorker = `importScripts("wasm_exec.js");
 const go = new Go();
@@ -76,6 +113,7 @@ func TestContainersOnWebGPU(t *testing.T) {
 	build(t, root, filepath.Join(site, "enginetest.wasm"), "./internal/cmd/enginetest", "js")
 	build(t, root, filepath.Join(site, "compute.wasm"), "./examples/compute", "wasip1")
 	build(t, root, filepath.Join(site, "mnist.wasm"), "./examples/mnist", "wasip1")
+	build(t, root, filepath.Join(site, "triangle.wasm"), "./examples/triangle", "wasip1")
 	wasmExec, err := os.ReadFile(filepath.Join(runtime.GOROOT(), "lib", "wasm", "wasm_exec.js"))
 	if err != nil {
 		t.Fatal(err)
@@ -87,6 +125,7 @@ func TestContainersOnWebGPU(t *testing.T) {
 		{Name: "mnist-cpu", Module: "mnist.wasm"},
 		{Name: "mnist-gpu", Module: "mnist.wasm", Args: []string{"gpu"}, GPU: true},
 		{Name: "mnist-gpu-no-cap", Module: "mnist.wasm", Args: []string{"gpu"}},
+		{Name: "triangle", Module: "triangle.wasm", Args: []string{"60"}, GPU: true},
 	}
 	cs, _ := json.Marshal(cases)
 	files := map[string][]byte{"index.html": []byte(enginePage), "engine.js": []byte(engineWorker), "wasm_exec.js": wasmExec,
@@ -127,6 +166,9 @@ func TestContainersOnWebGPU(t *testing.T) {
 		opts.Args = []string{"--enable-unsafe-webgpu"}
 		q = "?fallback=1"
 	}
+	// GPU_E2E_ARGS adds browser flags, e.g. --use-webgpu-adapter=swiftshader
+	// to reproduce the Linux lane on another machine.
+	opts.Args = append(opts.Args, strings.Fields(os.Getenv("GPU_E2E_ARGS"))...)
 	b, err := pw.Chromium.Launch(opts)
 	if err != nil {
 		t.Fatal(err)
@@ -171,6 +213,7 @@ func TestContainersOnWebGPU(t *testing.T) {
 		"mnist-cpu":        {0, []string{"digit 7 (p=1.000)"}},
 		"mnist-gpu":        {0, []string{"digit 7 (p=1.000)"}},
 		"mnist-gpu-no-cap": {1, nil},
+		"triangle":         {0, []string{"60 frames in"}},
 	}
 	for _, r := range rep.Results {
 		w := want[r.Name]
@@ -191,5 +234,73 @@ func TestContainersOnWebGPU(t *testing.T) {
 	}
 	if len(rep.Results) != len(cases) {
 		t.Errorf("%d results for %d cases", len(rep.Results), len(cases))
+	}
+	checkSurfaces(t, p, what != "GPU")
+}
+
+// checkSurfaces checks what the page (playing the dashboard) received
+// from the triangle: one surface opened and closed, 60 frames in order,
+// the triangle over the clear colour, frames that differ (it spins), and
+// a rate within the 60 per second pacing.
+func checkSurfaces(t *testing.T, p playwright.Page, fallback bool) {
+	v, err := p.Evaluate("JSON.stringify(window.__surfaces)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s surfaceLog
+	if err := json.Unmarshal([]byte(v.(string)), &s); err != nil {
+		t.Fatal(err)
+	}
+	var ops []string
+	for _, e := range s.Events {
+		ops = append(ops, e.Op)
+	}
+	if strings.Join(ops, ",") != "open,close" || s.Events[0].Width != 320 || s.Events[0].Height != 240 {
+		t.Fatalf("surface events %+v", s.Events)
+	}
+	// The open event names the container (the engine's wasi.Config.Label,
+	// set from runtime.Spec.ID).
+	if c := s.Events[0].Container; c != "c-triangle" {
+		t.Errorf("open event names container %q, want c-triangle", c)
+	}
+	if len(s.Frames) != 60 {
+		t.Fatalf("%d frames, want 60", len(s.Frames))
+	}
+	sums := map[uint32]bool{}
+	for i, f := range s.Frames {
+		if f.Seq != i+1 {
+			t.Fatalf("frame %d has seq %d", i, f.Seq)
+		}
+		sums[f.Sum] = true
+	}
+	first, last := s.Frames[0], s.Frames[59]
+	fps := 59 / ((last.T - first.T) / 1000)
+	t.Logf("triangle: 60 frames, %.1f per second at the page; corner %v, centre %v", fps, first.Corner, first.Center)
+	if fps > 66 {
+		t.Errorf("%.1f frames per second: pacing to 60 not enforced", fps)
+	}
+	// Open defect, fallback lane only: on Linux headless Chromium 143 with
+	// SwiftShader every frame reaches the page fully transparent (the same
+	// build renders correctly with SwiftShader on macOS, and with
+	// --enable-features=Vulkan it stays blank). Only that exact signature
+	// is tolerated, and only where no GPU is claimed.
+	blank := len(sums) == 1
+	for _, f := range s.Frames {
+		blank = blank && f.Corner[3] == 0 && f.Center[3] == 0 && f.Sum == 0
+	}
+	if blank && fallback {
+		t.Logf("OPEN DEFECT: all 60 frames are transparent on this fallback adapter; pixels not checked")
+		return
+	}
+	// Clear colour (0.05, 0.05, 0.1) in the corner, the triangle (its
+	// colours are bright) in the middle.
+	if c := first.Corner; c[0] > 30 || c[1] > 30 || c[2] > 45 || c[2] < 10 {
+		t.Errorf("corner pixel %v is not the clear colour", c)
+	}
+	if c := first.Center; c[0]+c[1]+c[2] < 200 {
+		t.Errorf("centre pixel %v: no triangle drawn", c)
+	}
+	if len(sums) < 30 {
+		t.Errorf("only %d distinct frames of 60: the triangle does not spin", len(sums))
 	}
 }

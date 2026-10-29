@@ -49,6 +49,7 @@ const (
 type Type struct {
 	Kind   Kind
 	Name   string  // type name for named types, resource name for Own/Borrow
+	Owner  string  // Own/Borrow: the resource's interface (ImportModule)
 	Elem   *Type   // List, Option, Future, Stream; Result's ok
 	Err    *Type   // Result's error
 	Fields []Field // Record, Tuple (labels "0", "1", ...)
@@ -108,6 +109,8 @@ type Interface struct {
 	Resources map[string]*Resource
 	Funcs     []*Func
 	order     []string // resource declaration order
+	uses      map[string]use
+	state     int // 0 unresolved, 1 resolving, 2 resolved
 }
 
 // ImportModule is the core import module name, "ns:pkg/iface@ver".
@@ -215,43 +218,67 @@ func (p *parser) ident() string {
 }
 
 // Parse reads WIT source holding one package and its interfaces.
-func Parse(src string) (map[string]*Interface, error) {
-	toks, err := tokenize(src)
-	if err != nil {
-		return nil, err
-	}
-	p := &parser{toks: toks}
+func Parse(src string) (map[string]*Interface, error) { return ParseFiles(nil, src) }
+
+// ParseFiles reads the files of one package (a file without a package
+// line belongs to the package of the others), resolving uses of its own
+// interfaces and of deps (interfaces of other packages, by short name or
+// by ImportModule). The result is keyed by short interface name.
+func ParseFiles(deps []*Interface, srcs ...string) (map[string]*Interface, error) {
 	out := map[string]*Interface{}
 	pkg := ""
-	for p.err == nil && p.peek() != "" {
-		switch p.next() {
-		case "package":
-			pkg = p.qualified()
-			p.expect(";")
-		case "interface":
-			i := &Interface{Package: pkg, Name: p.ident(), Types: map[string]*Type{}, Resources: map[string]*Resource{}}
-			p.expect("{")
-			for p.err == nil && p.peek() != "}" {
-				p.item(i)
+	var ifs []*Interface
+	for _, src := range srcs {
+		toks, err := tokenize(src)
+		if err != nil {
+			return nil, fmt.Errorf("wit: %w", err)
+		}
+		p := &parser{toks: toks}
+		for p.err == nil && p.peek() != "" {
+			switch p.next() {
+			case "package":
+				pkg = p.qualified()
+				p.expect(";")
+			case "interface":
+				i := &Interface{Name: p.ident(), Types: map[string]*Type{}, Resources: map[string]*Resource{}, uses: map[string]use{}}
+				p.expect("{")
+				for p.err == nil && p.peek() != "}" {
+					p.item(i)
+				}
+				p.expect("}")
+				out[i.Name] = i
+				ifs = append(ifs, i)
+			case "world":
+				p.ident()
+				p.skipBlock()
+			default:
+				p.err = fmt.Errorf("unexpected %q at top level (token %d)", p.toks[p.pos-1], p.pos)
 			}
-			p.expect("}")
-			out[i.Name] = i
-		case "world":
-			p.ident()
-			p.skipBlock()
-		default:
-			p.err = fmt.Errorf("unexpected %q at top level (token %d)", p.toks[p.pos-1], p.pos)
+		}
+		if p.err != nil {
+			return nil, fmt.Errorf("wit: %w", p.err)
 		}
 	}
-	if p.err != nil {
-		return nil, fmt.Errorf("wit: %w", p.err)
+	all := map[string]*Interface{}
+	for _, d := range deps {
+		all[d.ImportModule()] = d
 	}
-	for _, i := range out {
-		if err := i.resolve(); err != nil {
+	for _, i := range ifs {
+		i.Package = pkg
+		all[i.Name] = i
+		all[i.ImportModule()] = i
+	}
+	for _, i := range ifs {
+		if err := i.resolve(all); err != nil {
 			return nil, fmt.Errorf("wit: interface %s: %w", i.Name, err)
 		}
 	}
 	return out, nil
+}
+
+// use is a name brought in by a use statement.
+type use struct {
+	from, name string // interface (short name or ImportModule) and its name there
 }
 
 // qualified reads "ns:name@ver" or "ns:name/iface@ver" as one string.
@@ -375,11 +402,24 @@ func (p *parser) item(i *Interface) {
 		}
 		p.expect("}")
 	case "use":
-		// Types from another interface: not needed by the packages read
-		// here, whose uses name types this package resolves itself.
-		for p.err == nil && p.peek() != ";" {
-			p.next()
+		// use path.{a, b as c}; where path is an interface of this
+		// package or "ns:pkg/iface@version".
+		p.next()
+		path := strings.TrimSuffix(p.qualified(), ".")
+		p.expect("{")
+		for p.err == nil && p.peek() != "}" {
+			name := p.ident()
+			local := name
+			if p.peek() == "as" {
+				p.next()
+				local = p.ident()
+			}
+			i.uses[local] = use{from: path, name: name}
+			if p.peek() == "," {
+				p.next()
+			}
 		}
+		p.expect("}")
 		p.expect(";")
 	default:
 		f := &Func{Name: p.ident(), Kind: Freestanding}
@@ -484,22 +524,63 @@ func (p *parser) typ() *Type {
 	return &Type{Kind: Named, Name: name}
 }
 
+// resource finds the resource a name denotes here: a local one, or one
+// brought in by a use; it returns its name in its interface and that
+// interface's ImportModule.
+func (i *Interface) resource(name string, all map[string]*Interface) (string, string, bool) {
+	if _, ok := i.Resources[name]; ok {
+		return name, i.ImportModule(), true
+	}
+	if u, ok := i.uses[name]; ok {
+		if from := all[u.from]; from != nil {
+			return from.resource(u.name, all)
+		}
+	}
+	return "", "", false
+}
+
+// typeDef finds a type a name denotes here (local or used), resolved.
+func (i *Interface) typeDef(name string, all map[string]*Interface) (*Type, error) {
+	if t, ok := i.Types[name]; ok {
+		return t, nil
+	}
+	u, ok := i.uses[name]
+	if !ok {
+		return nil, fmt.Errorf("unknown type %q", name)
+	}
+	from := all[u.from]
+	if from == nil {
+		return nil, fmt.Errorf("use of %q from unknown interface %q", name, u.from)
+	}
+	if err := from.resolve(all); err != nil {
+		return nil, err
+	}
+	return from.typeDef(u.name, all)
+}
+
 // resolve replaces named references by their definitions (resources by
-// own handles), detecting unknown names and cycles.
-func (i *Interface) resolve() error {
+// own handles carrying their owner), detecting unknown names and cycles.
+func (i *Interface) resolve(all map[string]*Interface) error {
+	switch i.state {
+	case 2:
+		return nil
+	case 1:
+		return fmt.Errorf("interfaces use each other in a cycle at %s", i.Name)
+	}
+	i.state = 1
 	var walk func(t *Type, seen map[string]bool) error
 	walk = func(t *Type, seen map[string]bool) error {
 		if t == nil {
 			return nil
 		}
 		if t.Kind == Named {
-			if _, ok := i.Resources[t.Name]; ok {
-				*t = Type{Kind: Own, Name: t.Name}
+			if name, owner, ok := i.resource(t.Name, all); ok {
+				*t = Type{Kind: Own, Name: name, Owner: owner}
 				return nil
 			}
-			def, ok := i.Types[t.Name]
-			if !ok {
-				return fmt.Errorf("unknown type %q", t.Name)
+			def, err := i.typeDef(t.Name, all)
+			if err != nil {
+				return err
 			}
 			if seen[t.Name] {
 				return fmt.Errorf("type %q refers to itself", t.Name)
@@ -516,8 +597,16 @@ func (i *Interface) resolve() error {
 			}
 			return nil
 		}
-		if (t.Kind == Own || t.Kind == Borrow) && i.Resources[t.Name] == nil {
-			return fmt.Errorf("unknown resource %q", t.Name)
+		if t.Kind == Own || t.Kind == Borrow {
+			if t.Owner != "" {
+				return nil // resolved already (a shared definition)
+			}
+			name, owner, ok := i.resource(t.Name, all)
+			if !ok {
+				return fmt.Errorf("unknown resource %q", t.Name)
+			}
+			t.Name, t.Owner = name, owner
+			return nil
 		}
 		for _, c := range []*Type{t.Elem, t.Err} {
 			if err := walk(c, seen); err != nil {
@@ -555,5 +644,6 @@ func (i *Interface) resolve() error {
 			return fmt.Errorf("%s: %w", f.Name, err)
 		}
 	}
+	i.state = 2
 	return nil
 }

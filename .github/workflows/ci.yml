@@ -126,8 +126,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { lane: 'macos-latest, GPU', os: macos-latest, fallback: '0' }
-          - { lane: 'ubuntu, SwiftShader fallback', os: ubuntu-latest, fallback: '1' }
+          - { lane: 'macos-latest, GPU', os: macos-latest, fallback: '0', args: '' }
+          - { lane: 'ubuntu, SwiftShader fallback', os: ubuntu-latest, fallback: '1', args: '' }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -153,9 +153,12 @@ jobs:
         shell: bash
         env:
           GPU_E2E_ALLOW_FALLBACK: ${{ matrix.fallback }}
+          GPU_E2E_ARGS: ${{ matrix.args }}
         run: |
-          go test -tags e2e -count=1 -v -timeout 20m ./e2e/ > "$RUNNER_TEMP/e2e.log" 2>&1; status=$?
-          tail -60 "$RUNNER_TEMP/e2e.log"
+          # bash -e would exit at a failing go test before the log is shown.
+          status=0
+          go test -tags e2e -count=1 -v -timeout 20m ./e2e/ > "$RUNNER_TEMP/e2e.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/e2e.log"
           exit $status
 
   cross:

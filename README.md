@@ -18,8 +18,9 @@ Design and references: [docs/DESIGN.md](docs/DESIGN.md).
 | `nn`: wasi-nn host module (`wasi_ephemeral_nn`), CPU backend | **done** (v0.2.0) — see below |
 | `wasinn`: wasi-nn guest bindings for Go, `examples/mnist` | **done** (v0.2.0) |
 | `nn/webgpu`: wasi-nn GPU backend (WebGPU WGSL kernels, browser) | **done** (v0.3.0) — see below |
-| `wit`, `webgpu`, `wasigpu`: wasi:webgpu compute (host and Go guest), `examples/compute` | **done** — see below |
-| rendering to a dashboard pane | next |
+| `wit`, `webgpu`, `wasigpu`: wasi:webgpu compute (host and Go guest), `examples/compute` | **done** (v0.4.0) — see below |
+| rendering: `wasi-gfx:surface` + `surface-webgpu`, frames to the page, `examples/triangle` | **done** — see below; the dashboard pane is the dashboard's part |
+| surface input events, vertex buffers, depth-stencil | not yet |
 
 ## wasi:webgpu: `wit`, `webgpu` (host), `wasigpu` (guest)
 
@@ -54,6 +55,36 @@ element matches; matmul 15 ms on the GPU vs 42 ms on the guest's CPU, the
 vector add 69 ms vs 3.5 ms (dominated by transfers; one run, not a
 benchmark). Without `--gpu` the guest is told there is no adapter, and a
 fifth 64 MiB buffer traps on the memory quota.
+
+## Rendering: surfaces
+
+`webgpu.HostModules(backend)` serves three modules sharing one handle table
+per process: `wasi:webgpu/webgpu@0.3.0-rc.2`,
+`wasi-gfx:surface/surface@0.2.0` and `wasi-gfx:surface/surface-webgpu@0.2.0`
+(a guest using `wasigpu` imports all three). In the browser each surface
+is an `OffscreenCanvas` in the engine's worker; `present` turns it into an
+`ImageBitmap` handed to `Browser.OnSurface` with a sequence number (the
+`open` event names the container), for the
+page to draw (in the playground, a dashboard pane). The page acknowledges
+each frame (`webgpu.AckFrame`); at most 2 frames are unacknowledged
+(past that, `present` waits for an acknowledgement at most 1 s, so a page
+that stops acknowledging slows the guest to a frame per second without
+stopping it), frames are paced to 60
+per second, surfaces are at most 1920×1080. Render pipelines take their
+vertices from the shader (no vertex buffers yet) and have no depth-stencil;
+surface input events are not served yet.
+
+Guest side: `(*wasigpu.Device).Surface(w, h)`,
+`(*Surface).RenderPipeline(wgsl, vs, fs)` and `(*Surface).Frame(pipeline,
+uniforms, clear, vertices)`. [`examples/triangle`](examples/triangle) draws
+a spinning triangle; `e2e/engine_test.go` runs it as a container on an Apple
+Metal adapter and checks, at the page, 60 frames in order, the clear colour
+in a corner, the triangle in the middle, frames that change, and a rate
+within the 60 per second pacing (one run: 51 frames per second).
+**Open defect:** on Linux headless Chromium 143 with SwiftShader (the CI
+fallback lane) every frame reaches the page fully transparent, while the
+same build renders correctly with SwiftShader on macOS; that lane checks
+events, order, container and pacing, not pixels.
 
 ## wasi-nn: `nn` (host) and `wasinn` (guest)
 
