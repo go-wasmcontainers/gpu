@@ -81,10 +81,13 @@ a spinning triangle; `e2e/engine_test.go` runs it as a container on an Apple
 Metal adapter and checks, at the page, 60 frames in order, the clear colour
 in a corner, the triangle in the middle, frames that change, and a rate
 within the 60 per second pacing (one run: 51 frames per second).
-**Open defect:** on Linux headless Chromium 143 with SwiftShader (the CI
-fallback lane) every frame reaches the page fully transparent, while the
-same build renders correctly with SwiftShader on macOS; that lane checks
-events, order, container and pacing, not pixels.
+The same checks, pixels included, pass on the Linux SwiftShader lane.
+**Headless Linux Chromium** can back a WebGPU canvas only with Skia on
+Vulkan: launch it with `--enable-features=Vulkan --use-vulkan=swiftshader
+--use-angle=swiftshader` (or a real Vulkan driver), otherwise the WebGPU
+instance is torn down at the first canvas configure and frames are blank
+(docs/DESIGN.md, "Surfaces"). `go run ./internal/cmd/gpuprobe --canvas`
+follows one canvas frame from the GPU to the page to check a browser.
 
 ## wasi-nn: `nn` (host) and `wasinn` (guest)
 

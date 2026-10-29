@@ -127,7 +127,12 @@ jobs:
       matrix:
         include:
           - { lane: 'macos-latest, GPU', os: macos-latest, fallback: '0', args: '' }
-          - { lane: 'ubuntu, SwiftShader fallback', os: ubuntu-latest, fallback: '1', args: '' }
+          # Headless Linux Chromium can back a WebGPU canvas only with Skia on
+          # Vulkan (ExternalVkImageBacking; the headless Ozone platform has no
+          # native pixmaps): without these flags the WebGPU instance is torn
+          # down at the first canvas configure and every frame is blank.
+          # Found with `gpuprobe --canvas --try`; see docs/DESIGN.md.
+          - { lane: 'ubuntu, SwiftShader fallback', os: ubuntu-latest, fallback: '1', args: '--enable-features=Vulkan --use-vulkan=swiftshader --use-angle=swiftshader' }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -146,7 +151,10 @@ jobs:
       - name: the adapter this runner's browser offers
         shell: bash
         run: |
-          go run ./internal/cmd/gpuprobe --browser chromium --channel chromium > "$RUNNER_TEMP/probe.json"
+          probe_args="${{ matrix.args }}"
+          if [ "${{ matrix.fallback }}" = 1 ]; then probe_args="--enable-unsafe-webgpu $probe_args"; fi
+          # --canvas follows one WebGPU canvas frame from the GPU to the page.
+          go run ./internal/cmd/gpuprobe --browser chromium --channel chromium --canvas --args "$probe_args" > "$RUNNER_TEMP/probe.json"
           cat "$RUNNER_TEMP/probe.json"
           { echo '### WebGPU adapter (${{ matrix.lane }})'; echo '```json'; cat "$RUNNER_TEMP/probe.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: go test -tags e2e

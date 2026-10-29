@@ -117,6 +117,26 @@ Surface ids are unique within the engine worker; the `open` event names the
 container, so the dashboard can put the pane under it. A backend learns the
 container through `webgpu.Process{GPU, Container}`.
 
+**Headless Linux Chromium needs Skia on Vulkan for a WebGPU canvas.**
+Found on the CI SwiftShader lane, where every frame was fully transparent:
+`gpuprobe --canvas` showed the same clear and readback correct without a
+canvas, and the WebGPU instance torn down ("A valid external Instance
+reference no longer exists", every device lost) at the first canvas
+configure. In Chromium 143, `SharedImageFactory` backs a WebGPU swap-chain
+image on Linux with `OzoneImageBackingFactory` only if the Ozone platform
+supports native pixmaps (the headless platform keeps the default `false`,
+`ui/ozone/public/ozone_platform.h`), or with `ExternalVkImageBackingFactory`
+only when Skia runs on Vulkan
+(`gpu/command_buffer/service/shared_image/shared_image_factory.cc`). With
+neither, the swap buffer cannot exist, `ExportCurrentSharedImage` returns
+nothing on the destroyed device and `TransferToImageBitmap` hands back its
+transparent-black fallback
+(`third_party/blink/renderer/modules/webgpu/gpu_canvas_context.cc`). Of the
+flag sets tried (`gpuprobe --try`), only
+`--enable-features=Vulkan --use-vulkan=swiftshader --use-angle=swiftshader`
+renders and presents; the variants with ANGLE on Vulkan still lose the
+instance. A browser with a GPU and a display is not affected.
+
 The surface WIT (`webgpu/wit/surface.wit`) is **our own declaration** of
 the subset we serve, with the names and signatures of [gfx-surface] and
 [gfx-surface-webgpu]; no file was copied, because wasi-gfx/wasi-gfx
