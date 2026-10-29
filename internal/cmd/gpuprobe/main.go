@@ -167,6 +167,7 @@ window.probeCanvas = () => new Promise((res) => {
 // RootCmd is the command, for tests.
 func RootCmd() *cobra.Command {
 	var browser, args, channel string
+	var tries []string
 	var headed, canvas bool
 	cmd := &cobra.Command{
 		Use:          "gpuprobe [--browser chromium|firefox|webkit]",
@@ -174,15 +175,30 @@ func RootCmd() *cobra.Command {
 		SilenceUsage: true,
 		Args:         cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			rep, err := run(browser, args, channel, headed, canvas)
-			if err != nil {
-				return err
-			}
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")
-			return enc.Encode(rep)
+			if len(tries) == 0 {
+				rep, err := run(browser, args, channel, headed, canvas)
+				if err != nil {
+					return err
+				}
+				return enc.Encode(rep)
+			}
+			// One browser launch per --try, each with --args plus its own
+			// flags; a launch that fails is reported, not fatal.
+			var reps []*Report
+			for _, t := range tries {
+				all := strings.TrimSpace(args + " " + t)
+				rep, err := run(browser, all, channel, headed, canvas)
+				if err != nil {
+					rep = &Report{Browser: browser, UserArgs: all, Window: Probe{Error: err.Error()}}
+				}
+				reps = append(reps, rep)
+			}
+			return enc.Encode(reps)
 		},
 	}
+	cmd.Flags().StringArrayVar(&tries, "try", nil, "run once per --try, adding these space-separated flags to --args (repeatable); prints a list of reports")
 	cmd.Flags().StringVar(&browser, "browser", "chromium", "chromium, firefox or webkit")
 	cmd.Flags().StringVar(&args, "args", "", "extra browser arguments, space-separated (e.g. --enable-unsafe-webgpu)")
 	cmd.Flags().StringVar(&channel, "channel", "", `browser channel ("chromium": the full browser in new headless mode, not the headless shell)`)

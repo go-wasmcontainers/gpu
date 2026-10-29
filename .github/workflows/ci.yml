@@ -152,6 +152,16 @@ jobs:
           go run ./internal/cmd/gpuprobe --browser chromium --channel chromium --canvas --args "$probe_args" > "$RUNNER_TEMP/probe.json"
           cat "$RUNNER_TEMP/probe.json"
           { echo '### WebGPU adapter (${{ matrix.lane }})'; echo '```json'; cat "$RUNNER_TEMP/probe.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: canvas presentation under candidate flags (diagnosis)
+        if: matrix.fallback == '1'
+        shell: bash
+        run: |
+          go run ./internal/cmd/gpuprobe --browser chromium --channel chromium --canvas --args "--enable-unsafe-webgpu" \
+            --try "" \
+            --try "--enable-features=Vulkan --use-vulkan=swiftshader" \
+            --try "--enable-features=Vulkan --use-vulkan=swiftshader --use-angle=vulkan" \
+            --try "--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan --use-vulkan=swiftshader --use-angle=vulkan" \
+            --try "--enable-features=Vulkan --use-vulkan=swiftshader --use-angle=swiftshader"
       - name: go test -tags e2e
         shell: bash
         env:
