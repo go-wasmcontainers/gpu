@@ -15,7 +15,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/playwright-community/playwright-go"
+	"github.com/mxschmitt/playwright-go"
 	"github.com/spf13/cobra"
 )
 
