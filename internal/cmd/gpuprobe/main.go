@@ -46,6 +46,8 @@ type CanvasProbe struct {
 	GPU       []int  `json:"gpu,omitempty"`      // copyTextureToBuffer of the canvas texture
 	Worker2D  []int  `json:"worker2d,omitempty"` // the transferred ImageBitmap drawn in the worker
 	Page2D    []int  `json:"page2d,omitempty"`   // the same bitmap drawn in the page
+	Step      string `json:"step,omitempty"`     // the last step reached
+	Lost      string `json:"lost,omitempty"`     // device.lost reason and message
 	Error     string `json:"error,omitempty"`
 }
 
@@ -82,37 +84,55 @@ const probeJS = `async function probe() {
 // which draws it again (is it readable where the dashboard draws it?).
 const canvasJS = `async function canvasProbe() {
   const out = [];
-  const a = await navigator.gpu.requestAdapter();
-  if (!a) return [{error: "no adapter"}];
-  const d = await a.requestDevice();
   const format = navigator.gpu.getPreferredCanvasFormat();
   const clear = {r: 0.2, g: 0.4, b: 0.6, a: 1};
-  for (const alphaMode of ["premultiplied", "opaque"]) {
-    const r = {alphaMode, format};
+  // "texture" is the control: the same clear and readback without a canvas.
+  for (const mode of ["texture", "premultiplied", "opaque"]) {
+    const r = {alphaMode: mode, format, step: "adapter"};
+    let d;
     try {
+      const a = await navigator.gpu.requestAdapter();
+      if (!a) { r.error = "no adapter"; out.push(r); continue; }
+      d = await a.requestDevice();
+      d.lost.then((l) => { r.lost = l.reason + ": " + l.message; });
       d.pushErrorScope("validation");
-      const c = new OffscreenCanvas(8, 8);
-      const ctx = c.getContext("webgpu");
-      ctx.configure({device: d, format, alphaMode,
-        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC});
-      const tex = ctx.getCurrentTexture();
+      let c = null, tex;
+      if (mode === "texture") {
+        tex = d.createTexture({size: [8, 8], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC});
+      } else {
+        r.step = "configure";
+        c = new OffscreenCanvas(8, 8);
+        const ctx = c.getContext("webgpu");
+        ctx.configure({device: d, format, alphaMode: mode,
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC});
+        r.step = "getCurrentTexture";
+        tex = ctx.getCurrentTexture();
+      }
+      r.step = "render";
       const buf = d.createBuffer({size: 256 * 8, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ});
       const enc = d.createCommandEncoder();
       const pass = enc.beginRenderPass({colorAttachments: [{view: tex.createView(), clearValue: clear, loadOp: "clear", storeOp: "store"}]});
       pass.end();
       enc.copyTextureToBuffer({texture: tex}, {buffer: buf, bytesPerRow: 256}, [8, 8]);
       d.queue.submit([enc.finish()]);
+      r.step = "mapAsync";
       await buf.mapAsync(GPUMapMode.READ);
       r.gpu = Array.from(new Uint8Array(buf.getMappedRange(), 4 * (4 + 4 * 64), 4));
       buf.unmap();
-      const bm = c.transferToImageBitmap();
-      const w2 = new OffscreenCanvas(8, 8).getContext("2d");
-      w2.drawImage(bm, 0, 0);
-      r.worker2d = Array.from(w2.getImageData(4, 4, 1, 1).data);
-      r.bitmap = bm;
       const err = await d.popErrorScope();
       if (err) r.error = err.message;
+      if (c) {
+        r.step = "transferToImageBitmap";
+        const bm = c.transferToImageBitmap();
+        const w2 = new OffscreenCanvas(8, 8).getContext("2d");
+        w2.drawImage(bm, 0, 0);
+        r.worker2d = Array.from(w2.getImageData(4, 4, 1, 1).data);
+        r.bitmap = bm;
+      }
+      r.step = "done";
     } catch (e) { r.error = String(e); }
+    // Let a pending device loss report its reason.
+    await new Promise((res) => setTimeout(res, 200));
     out.push(r);
   }
   return out;
