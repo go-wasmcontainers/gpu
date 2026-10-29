@@ -28,6 +28,19 @@ func Alloc(align, size uint32) uint32 {
 // Release unpins every block (their contents must have been read).
 func Release() { pinned = pinned[:0] }
 
+// Buffer returns a block of size bytes aligned to align that Release does
+// not unpin: it stays valid while the caller keeps keep reachable (a
+// buffer the host fills later, such as a pending stream read's).
+func Buffer(align, size uint32) (addr uint32, keep []byte) {
+	if align == 0 {
+		align = 1
+	}
+	keep = make([]byte, size+align)
+	p := uintptr(unsafe.Pointer(unsafe.SliceData(keep)))
+	p = (p + uintptr(align) - 1) &^ (uintptr(align) - 1)
+	return uint32(p), keep
+}
+
 // Memory is the guest's own linear memory.
 type Memory struct{}
 

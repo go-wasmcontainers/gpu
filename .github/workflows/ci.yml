@@ -69,6 +69,7 @@ jobs:
           # Canonical ABI loads, and wasi:webgpu calls with any arguments.
           - { target: FuzzLoad, pkg: ./wit }
           - { target: FuzzWebGPUCalls, pkg: ./webgpu }
+          - { target: FuzzStreamCalls, pkg: ./webgpu }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7

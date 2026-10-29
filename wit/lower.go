@@ -60,6 +60,29 @@ type Lowering struct {
 	v    any
 	ret  uint32 // the return area, when the result goes through memory
 	Reqs []AllocReq
+
+	elem  *Type // PlanElems: the element type, stored from ret on
+	elems []any
+}
+
+// PlanElems prepares storing vs, each a t, one after another from p (a
+// stream read's buffer: stream.read lowers its elements there).
+func PlanElems(p uint32, t *Type, vs []any) (*Lowering, error) {
+	if p%Align(t) != 0 {
+		return nil, trap("misaligned buffer at %#x", p)
+	}
+	n := uint64(len(vs)) * uint64(Size(t))
+	if n > MaxListBytes || uint64(p)+n > 1<<32 {
+		// The second bound keeps p + i*size from wrapping around.
+		return nil, trap("%d elements at %#x", len(vs), p)
+	}
+	l := &Lowering{ret: p, elem: t, elems: vs}
+	rec := &recorder{}
+	if _, err := l.lower(discard{}, rec); err != nil {
+		return nil, err
+	}
+	l.Reqs = rec.reqs
+	return l, nil
 }
 
 // PlanResult prepares lowering f's result v. args are the call's core
@@ -101,6 +124,15 @@ func (l *Lowering) Apply(m Memory, ptrs []uint32) (uint64, error) {
 }
 
 func (l *Lowering) lower(m Memory, a Allocator) (uint64, error) {
+	if l.elem != nil {
+		sz := Size(l.elem)
+		for i, v := range l.elems {
+			if err := Store(m, a, l.ret+uint32(i)*sz, l.elem, v); err != nil {
+				return 0, err
+			}
+		}
+		return 0, nil
+	}
 	if l.f.Result == nil {
 		return 0, nil
 	}
@@ -155,7 +187,9 @@ func intOf(v any) (uint64, error) {
 // Store writes v of type t at p, allocating strings and lists with a.
 func Store(m Memory, a Allocator, p uint32, t *Type, v any) error {
 	switch t.Kind {
-	case Bool, U8, U16, U32, U64, S8, S16, S32, S64, Char, Flags, Own, Borrow:
+	case Bool, U8, U16, U32, U64, S8, S16, S32, S64, Char, Flags, Own, Borrow, Future, Stream:
+		// A future or stream is lowered as the index of its readable end in
+		// the handle table (lower_stream), which the host created.
 		x, err := intOf(v)
 		if err != nil {
 			return err
@@ -196,8 +230,6 @@ func Store(m Memory, a Allocator, p uint32, t *Type, v any) error {
 			q += Size(f.Type)
 		}
 		return nil
-	case Future, Stream:
-		return fmt.Errorf("future and stream values are not supported")
 	}
 	d, pv, err := caseOf(t, v)
 	if err != nil {
@@ -277,7 +309,7 @@ func storeRange(m Memory, a Allocator, t *Type, v any) (uint32, uint32, error) {
 // LowerFlat is lower_flat: v of type t as core values.
 func LowerFlat(m Memory, a Allocator, t *Type, v any) ([]uint64, error) {
 	switch t.Kind {
-	case Bool, U8, U16, U32, Char, Flags, Own, Borrow:
+	case Bool, U8, U16, U32, Char, Flags, Own, Borrow, Future, Stream:
 		x, err := intOf(v)
 		return []uint64{uint64(uint32(x))}, err
 	case S8, S16, S32:
@@ -315,8 +347,6 @@ func LowerFlat(m Memory, a Allocator, t *Type, v any) ([]uint64, error) {
 			out = append(out, x...)
 		}
 		return out, nil
-	case Future, Stream:
-		return nil, fmt.Errorf("future and stream values are not supported")
 	}
 	d, pv, err := caseOf(t, v)
 	if err != nil {

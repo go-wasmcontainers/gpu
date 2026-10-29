@@ -26,7 +26,7 @@ const (
 	contextModule = "wasi-gfx:surface/surface-webgpu@0.2.0"
 )
 
-var webgpuIface *wit.Interface
+var webgpuIface, surfaceIface *wit.Interface
 
 // enum is a WIT enum label's index (e.g. enum("gpu-load-op", "clear")).
 func enum(typ, label string) uint32 {
@@ -49,6 +49,7 @@ var funcs = func() map[string]*wit.Func {
 	if err != nil {
 		panic(err)
 	}
+	surfaceIface = s["surface"]
 	out := map[string]*wit.Func{}
 	for _, i := range []*wit.Interface{w["webgpu"], s["surface"], s["surface-webgpu"]} {
 		for _, f := range i.Funcs {

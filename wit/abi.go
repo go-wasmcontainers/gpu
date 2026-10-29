@@ -336,11 +336,10 @@ func Load(m Memory, p uint32, t *Type) (any, error) {
 		return out, nil
 	case Flags:
 		return loadInt(m, p, flagsSize(len(t.Labels)))
-	case Own, Borrow:
+	case Own, Borrow, Future, Stream:
+		// A future or stream is the index of its end in the handle table.
 		v, err := loadInt(m, p, 4)
 		return uint32(v), err
-	case Future, Stream:
-		return nil, trap("future and stream values are not supported")
 	}
 	cs := cases(t)
 	ds := discSize(len(cs))
@@ -583,11 +582,9 @@ func liftFlat(it *flatIter, t *Type, m Memory) (any, error) {
 	case Flags:
 		v, err := it.next()
 		return uint64(uint32(v)), err
-	case Own, Borrow:
+	case Own, Borrow, Future, Stream:
 		v, err := it.next()
 		return uint32(v), err
-	case Future, Stream:
-		return nil, trap("future and stream values are not supported")
 	}
 	flat := Flatten(t)
 	d, err := it.next()

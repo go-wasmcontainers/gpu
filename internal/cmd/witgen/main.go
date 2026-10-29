@@ -122,6 +122,7 @@ func Generate(ifs []*wit.Interface, pkg string) ([]byte, error) {
 	}
 	var imps []imp
 	var mods []string
+	streams := false
 	for _, i := range ifs {
 		mods = append(mods, i.ImportModule())
 		for _, f := range i.Funcs {
@@ -132,8 +133,21 @@ func Generate(ifs []*wit.Interface, pkg string) ([]byte, error) {
 			for _, f := range i.Resources[r].Funcs {
 				s := wit.Sig(f)
 				imps = append(imps, imp{i.ImportModule(), f.ImportName(r), string(s.Params), string(s.Results)})
+				if wit.ReturnsStream(f) {
+					// The Canonical ABI built-ins that read the stream.
+					streams = true
+					for _, b := range wit.StreamBuiltins(f.ImportName(r)) {
+						imps = append(imps, imp{i.ImportModule(), b.Name, b.Params, b.Result})
+					}
+				}
 			}
 			imps = append(imps, imp{i.ImportModule(), "[resource-drop]" + r, "i", ""})
+		}
+	}
+	if streams {
+		mods = append(mods, wit.RootModule)
+		for _, b := range wit.WaitableBuiltins {
+			imps = append(imps, imp{wit.RootModule, b.Name, b.Params, b.Result})
 		}
 	}
 	var b bytes.Buffer

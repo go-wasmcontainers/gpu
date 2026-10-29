@@ -59,10 +59,15 @@ w.onmessage = (e) => {
     const all = g.getImageData(0, 0, d.width, d.height).data;
     let sum = 0;
     for (let i = 0; i < all.length; i += 7) sum = (sum + all[i] * (i % 251)) >>> 0;
-    window.__surfaces.frames.push({seq: d.seq, t: performance.now(), w: d.width, h: d.height,
+    window.__surfaces.frames.push({surface: d.surface, seq: d.seq, t: performance.now(), w: d.width, h: d.height,
       center: px(d.width >> 1, d.height >> 1), corner: px(2, 2), sum});
     d.bitmap.close();
     w.postMessage({t: "frame-ack", surface: d.surface, seq: d.seq});
+    // A click and a key on the pane, as the dashboard forwards them.
+    if (d.seq === 5) {
+      w.postMessage({t: "input", surface: d.surface, kind: "pointer-down", x: 10, y: 20});
+      w.postMessage({t: "input", surface: d.surface, kind: "key-down", code: "KeyA", text: "A", shift: true});
+    }
   }
 };
 w.onerror = (e) => { window.__report = JSON.stringify({error: "worker: " + e.message}); };
@@ -76,12 +81,13 @@ type surfaceLog struct {
 		Width, Height int
 	} `json:"events"`
 	Frames []struct {
-		Seq    int     `json:"seq"`
-		T      float64 `json:"t"`
-		W, H   int
-		Center []int  `json:"center"`
-		Corner []int  `json:"corner"`
-		Sum    uint32 `json:"sum"`
+		Surface int     `json:"surface"`
+		Seq     int     `json:"seq"`
+		T       float64 `json:"t"`
+		W, H    int
+		Center  []int  `json:"center"`
+		Corner  []int  `json:"corner"`
+		Sum     uint32 `json:"sum"`
 	} `json:"frames"`
 }
 
@@ -126,6 +132,8 @@ func TestContainersOnWebGPU(t *testing.T) {
 		{Name: "mnist-gpu", Module: "mnist.wasm", Args: []string{"gpu"}, GPU: true},
 		{Name: "mnist-gpu-no-cap", Module: "mnist.wasm", Args: []string{"gpu"}},
 		{Name: "triangle", Module: "triangle.wasm", Args: []string{"60"}, GPU: true},
+		// The page clicks and types on every surface at its 5th frame.
+		{Name: "triangle-input", Module: "triangle.wasm", Args: []string{"40", "input"}, GPU: true},
 	}
 	cs, _ := json.Marshal(cases)
 	files := map[string][]byte{"index.html": []byte(enginePage), "engine.js": []byte(engineWorker), "wasm_exec.js": wasmExec,
@@ -214,6 +222,7 @@ func TestContainersOnWebGPU(t *testing.T) {
 		"mnist-gpu":        {0, []string{"digit 7 (p=1.000)"}},
 		"mnist-gpu-no-cap": {1, nil},
 		"triangle":         {0, []string{"60 frames in"}},
+		"triangle-input":   {0, []string{"pointer-down 10,20\n", "key-down key-a \"A\" shift=true\n", "40 frames in"}},
 	}
 	for _, r := range rep.Results {
 		w := want[r.Name]
@@ -238,30 +247,39 @@ func TestContainersOnWebGPU(t *testing.T) {
 	checkSurfaces(t, p)
 }
 
-// checkSurfaces checks what the page (playing the dashboard) received
-// from the triangle: one surface opened and closed, 60 frames in order,
-// the triangle over the clear colour, frames that differ (it spins), and
-// a rate within the 60 per second pacing.
+// checkSurfaces checks what the page (playing the dashboard) received:
+// two surfaces (triangle, then triangle-input), each opened and closed and
+// named after its container; for the first, 60 frames in order, the
+// triangle over the clear colour, frames that differ (it spins), and a
+// rate within the 60 per second pacing.
 func checkSurfaces(t *testing.T, p playwright.Page) {
 	v, err := p.Evaluate("JSON.stringify(window.__surfaces)")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var s surfaceLog
-	if err := json.Unmarshal([]byte(v.(string)), &s); err != nil {
+	var all surfaceLog
+	if err := json.Unmarshal([]byte(v.(string)), &all); err != nil {
 		t.Fatal(err)
 	}
 	var ops []string
-	for _, e := range s.Events {
+	for _, e := range all.Events {
 		ops = append(ops, e.Op)
 	}
-	if strings.Join(ops, ",") != "open,close" || s.Events[0].Width != 320 || s.Events[0].Height != 240 {
-		t.Fatalf("surface events %+v", s.Events)
+	if strings.Join(ops, ",") != "open,close,open,close" || all.Events[0].Width != 320 || all.Events[0].Height != 240 {
+		t.Fatalf("surface events %+v", all.Events)
 	}
 	// The open event names the container (the engine's wasi.Config.Label,
 	// set from runtime.Spec.ID).
-	if c := s.Events[0].Container; c != "c-triangle" {
-		t.Errorf("open event names container %q, want c-triangle", c)
+	if a, b := all.Events[0].Container, all.Events[2].Container; a != "c-triangle" || b != "c-triangle-input" {
+		t.Errorf("open events name containers %q, %q", a, b)
+	}
+	// The rest is about the first surface.
+	s := all
+	s.Frames = nil
+	for _, f := range all.Frames {
+		if f.Surface == all.Events[0].Surface {
+			s.Frames = append(s.Frames, f)
+		}
 	}
 	if len(s.Frames) != 60 {
 		t.Fatalf("%d frames, want 60", len(s.Frames))

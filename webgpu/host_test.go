@@ -52,6 +52,11 @@ func TestModuleShape(t *testing.T) {
 	n := len(Interface.Funcs) + len(Interface.Resources)
 	for _, r := range Interface.Resources {
 		n += len(r.Funcs)
+		for _, f := range r.Funcs {
+			if f.Result != nil && f.Result.Kind == wit.Stream {
+				n += 5 // its stream built-ins
+			}
+		}
 	}
 	if len(m.Funcs()) != n || n < 200 {
 		t.Errorf("%d functions exported, want %d", len(m.Funcs()), n)
