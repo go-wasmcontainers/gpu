@@ -2,8 +2,9 @@
 // packages/surface) this engine serves, declared here with the same
 // package, interface, type and function names and signatures so a guest
 // built against the upstream WIT links against it. The upstream repository
-// publishes no license, so its files are not copied; the input-event
-// functions (which return streams) are not served yet.
+// publishes no license, so its files are not copied. Served: the surface,
+// its size, and its pointer and key input streams; not served yet:
+// on-resize and on-frame.
 package wasi-gfx:surface@0.2.0;
 
 interface surface {
@@ -17,6 +18,56 @@ interface surface {
     height: func() -> u32;
     width: func() -> u32;
     request-set-size: func(height: option<u32>, width: option<u32>);
+    on-pointer-up: func() -> stream<pointer-event>;
+    on-pointer-down: func() -> stream<pointer-event>;
+    on-pointer-move: func() -> stream<pointer-event>;
+    on-key-up: func() -> stream<key-event>;
+    on-key-down: func() -> stream<key-event>;
+  }
+
+  // Surface pixels, from the top-left corner.
+  record pointer-event {
+    x: f64,
+    y: f64,
+  }
+
+  record key-event {
+    key: option<key>,
+    text: option<string>,
+    alt-key: bool,
+    ctrl-key: bool,
+    meta-key: bool,
+    shift-key: bool,
+  }
+
+  // The physical keys of the UI Events KeyboardEvent code tables
+  // (https://w3c.github.io/uievents-code/), in upstream's order; an
+  // unidentified key is none.
+  enum key {
+    backquote, backslash, bracket-left, bracket-right, comma,
+    digit0, digit1, digit2, digit3, digit4, digit5, digit6, digit7, digit8, digit9,
+    equal, intl-backslash, intl-ro, intl-yen,
+    key-a, key-b, key-c, key-d, key-e, key-f, key-g, key-h, key-i, key-j, key-k, key-l, key-m,
+    key-n, key-o, key-p, key-q, key-r, key-s, key-t, key-u, key-v, key-w, key-x, key-y, key-z,
+    minus, period, quote, semicolon, slash,
+    alt-left, alt-right, backspace, caps-lock, context-menu, control-left, control-right,
+    enter, meta-left, meta-right, shift-left, shift-right, space, tab,
+    convert, kana-mode, lang1, lang2, lang3, lang4, lang5, non-convert,
+    delete, end, help, home, insert, page-down, page-up,
+    arrow-down, arrow-left, arrow-right, arrow-up,
+    num-lock, numpad0, numpad1, numpad2, numpad3, numpad4, numpad5, numpad6, numpad7, numpad8, numpad9,
+    numpad-add, numpad-backspace, numpad-clear, numpad-clear-entry, numpad-comma, numpad-decimal,
+    numpad-divide, numpad-enter, numpad-equal, numpad-hash, numpad-memory-add, numpad-memory-clear,
+    numpad-memory-recall, numpad-memory-store, numpad-memory-subtract, numpad-multiply,
+    numpad-paren-left, numpad-paren-right, numpad-star, numpad-subtract,
+    escape, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, fn, fn-lock,
+    print-screen, scroll-lock, pause,
+    browser-back, browser-favorites, browser-forward, browser-home, browser-refresh, browser-search, browser-stop,
+    eject, launch-app1, launch-app2, launch-mail,
+    media-play-pause, media-select, media-stop, media-track-next, media-track-previous,
+    power, sleep, audio-volume-down, audio-volume-mute, audio-volume-up, wake-up,
+    hyper, super, turbo, abort, resume, suspend,
+    again, copy, cut, find, open, paste, props, select, undo, hiragana, katakana,
   }
 }
 

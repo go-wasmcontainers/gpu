@@ -45,7 +45,9 @@ type export struct {
 	name     string // core import name
 	resource string // owning resource, "" for get-gpu
 	fn       *wit.Func
-	drop     bool // [resource-drop]
+	drop     bool     // [resource-drop]
+	builtin  *builtin // a stream built-in (streams.go)
+	root     int      // $root module: index in rootFuncs
 }
 
 // Limits bound one process's use of the GPU.
@@ -107,8 +109,9 @@ type Module struct {
 // NewModule serves wasi:webgpu with a backend (nil: no GPU anywhere).
 func NewModule(b Backend) *Module { return NewModules(b)[0] }
 
-// NewModules serves wasi:webgpu and wasi-gfx:surface (surface,
-// surface-webgpu) with one backend: register all three.
+// NewModules serves wasi:webgpu, wasi-gfx:surface (surface,
+// surface-webgpu) and the waitable-set built-ins ($root) with one backend:
+// register all four.
 func NewModules(b Backend) []*Module {
 	if b == nil {
 		b = noGPU{}
@@ -123,12 +126,19 @@ func NewModules(b Backend) []*Module {
 		for _, r := range i.ResourceNames() {
 			for _, f := range i.Resources[r].Funcs {
 				m.exports = append(m.exports, export{name: f.ImportName(r), resource: r, fn: f})
+				if f.Result != nil && f.Result.Kind == wit.Stream {
+					m.exports = append(m.exports, streamBuiltins(f.ImportName(r), f.Result.Elem)...)
+				}
 			}
 			m.exports = append(m.exports, export{name: "[resource-drop]" + r, resource: r, drop: true})
 		}
 		out = append(out, m)
 	}
-	return out
+	root := &Module{Backend: b, Limits: DefaultLimits, shared: sh}
+	for i, f := range rootFuncs {
+		root.exports = append(root.exports, export{name: f.Name, root: i})
+	}
+	return append(out, root)
 }
 
 // HostModules is NewModules as the engine's host-module list.
@@ -180,14 +190,27 @@ func (sh *sharedState) release(p *wasi.Proc, ps *procState) {
 }
 
 // Module implements wasi.HostModule.
-func (m *Module) Module() string { return m.iface.ImportModule() }
+func (m *Module) Module() string {
+	if m.iface == nil {
+		return RootModule
+	}
+	return m.iface.ImportModule()
+}
 
 // Funcs implements wasi.HostModule: every function of the interface, with
-// its Canonical ABI core signature, and a drop per resource.
+// its Canonical ABI core signature, a drop per resource, and the stream
+// built-ins of the functions returning streams.
 func (m *Module) Funcs() []wasi.HostFunc {
 	out := make([]wasi.HostFunc, len(m.exports))
 	for i, e := range m.exports {
-		if e.drop {
+		switch {
+		case m.iface == nil:
+			out[i] = rootFuncs[e.root]
+			continue
+		case e.builtin != nil:
+			out[i] = wasi.HostFunc{Name: e.name, Params: e.builtin.params, Result: e.builtin.result}
+			continue
+		case e.drop:
 			out[i] = wasi.HostFunc{Name: e.name, Params: "i"}
 			continue
 		}
@@ -223,6 +246,12 @@ func (in *instance) Call(fn int, args []uint64, m wasi.Memory) wasi.Result {
 		return wasi.Result{Trap: "wasi:webgpu: no such function"}
 	}
 	e := in.m.exports[fn]
+	switch {
+	case in.m.iface == nil:
+		return streamIO{in.h}.root(e.root, args, m)
+	case e.builtin != nil:
+		return e.builtin.call(streamIO{in.h}, args, m)
+	}
 	if e.drop {
 		if err := in.h.Drop(uint32(args[0]), e.resource); err != nil {
 			return trapResult(err)
@@ -259,6 +288,12 @@ func (in *instance) lowerResult(f *wit.Func, v any, args []uint64, m wasi.Memory
 	if err != nil {
 		return trapResult(err)
 	}
+	return applyLowering(l, m, func(ret uint64, _ wasi.Memory) wasi.Result { return wasi.Result{Ret: ret} })
+}
+
+// applyLowering obtains l's allocations one by one through Result.Realloc,
+// applies it, and continues with then.
+func applyLowering(l *wit.Lowering, m wasi.Memory, then func(ret uint64, m wasi.Memory) wasi.Result) wasi.Result {
 	ptrs := make([]uint32, 0, len(l.Reqs))
 	var step func(m wasi.Memory) wasi.Result
 	step = func(m wasi.Memory) wasi.Result {
@@ -267,7 +302,7 @@ func (in *instance) lowerResult(f *wit.Func, v any, args []uint64, m wasi.Memory
 			if err != nil {
 				return trapResult(err)
 			}
-			return wasi.Result{Ret: ret}
+			return then(ret, m)
 		}
 		r := l.Reqs[len(ptrs)]
 		return wasi.Result{Realloc: &wasi.Realloc{Align: r.Align, Size: r.Size, Then: func(p uint32, m wasi.Memory) wasi.Result {

@@ -77,12 +77,23 @@ func AckFrame(surface uint32, seq uint64) {
 	sf.mu.Unlock()
 }
 
+// SurfaceInput delivers a pointer or key event from the page to a
+// surface's input streams (docs/DESIGN.md, "Surfaces"); it reports
+// whether the surface exists and the event was valid.
+func SurfaceInput(surface uint32, e InputEvent) bool {
+	surfaces.Lock()
+	sf := surfaces.all[surface]
+	surfaces.Unlock()
+	return sf != nil && sf.input.publish(e)
+}
+
 // surfaceObj is a container's surface: an OffscreenCanvas in this worker.
 type surfaceObj struct {
 	id     uint32
 	canvas js.Value
 	last   time.Time
 	emit   func(SurfaceEvent)
+	input  inputHub
 
 	mu    sync.Mutex
 	seq   uint64
@@ -94,6 +105,7 @@ func (s *surfaceObj) Destroy() {
 	surfaces.Lock()
 	delete(surfaces.all, s.id)
 	surfaces.Unlock()
+	s.input.close()
 	if s.emit != nil {
 		s.emit(SurfaceEvent{Op: "close", Surface: s.id})
 	}
