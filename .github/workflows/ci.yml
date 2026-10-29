@@ -143,6 +143,9 @@ jobs:
       - run: go version && node --version
       - name: Playwright driver and Chromium
         shell: bash
+        # A hung install (driver v1.57.0 under Node 26 never finishes
+        # extracting Chromium) fails here instead of at the job timeout.
+        timeout-minutes: 10
         run: |
           echo "PLAYWRIGHT_DRIVER_PATH=$RUNNER_TEMP/pwdriver" >> "$GITHUB_ENV"
           echo "PLAYWRIGHT_NODEJS_PATH=$(command -v node)" >> "$GITHUB_ENV"
