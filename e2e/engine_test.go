@@ -39,7 +39,8 @@ type engineReport struct {
 		Error  string  `json:"error"`
 		Ms     float64 `json:"ms"`
 	} `json:"results"`
-	Error string `json:"error"`
+	Error              string `json:"error"`
+	ConfiguredSurfaces int64  `json:"configuredSurfaces"`
 }
 
 // enginePage plays the dashboard's part for surfaces: it draws each frame
@@ -265,6 +266,11 @@ func TestContainersOnWebGPU(t *testing.T) {
 	}
 	if len(rep.Results) != len(cases) {
 		t.Errorf("%d results for %d cases", len(rep.Results), len(cases))
+	}
+	// The triangles configure a surface and drop it at exit without
+	// unconfiguring: dropping must release the WebGPU context.
+	if rep.ConfiguredSurfaces != 0 {
+		t.Errorf("%d surfaces still hold a WebGPU context after every container ended", rep.ConfiguredSurfaces)
 	}
 	checkSurfaces(t, p)
 }

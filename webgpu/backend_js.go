@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"syscall/js"
 	"time"
 
@@ -107,10 +108,32 @@ type surfaceObj struct {
 	ackCh chan struct{}
 }
 
+// configured counts the surfaces whose WebGPU context is configured, in
+// every process of this worker: a dropped surface must release its
+// context (e2e/engine_test.go checks the count is back to zero).
+var configured atomic.Int64
+
+// ConfiguredSurfaces is how many surfaces have a configured WebGPU
+// context right now (for tests and metrics).
+func ConfiguredSurfaces() int64 { return configured.Load() }
+
+// setSurface replaces the surface's WebGPU side (nil releases it).
+func (s *surfaceObj) setSurface(surf *wg.Surface) {
+	if s.surf != nil {
+		s.surf.Destroy()
+		configured.Add(-1)
+	}
+	s.surf = surf
+	if surf != nil {
+		configured.Add(1)
+	}
+}
+
 func (s *surfaceObj) Destroy() {
 	surfaces.Lock()
 	delete(surfaces.all, s.id)
 	surfaces.Unlock()
+	s.setSurface(nil) // a dropped surface keeps no WebGPU context
 	s.input.close()
 	if s.emit != nil {
 		s.emit(SurfaceEvent{Op: "close", Surface: s.id})

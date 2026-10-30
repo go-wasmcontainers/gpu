@@ -3,6 +3,7 @@
 package webgpu
 
 import (
+	"errors"
 	"syscall/js"
 	"time"
 
@@ -171,21 +172,22 @@ func (s *session) render(name string, a []any) (any, error, bool) {
 			desc.AlphaMode = wg.CanvasAlphaMode(enumLabel("gpu-canvas-alpha-mode", m))
 		}
 		sf := o.(*contextObj).sf
+		// A reconfigure: release the old side first, since both share the
+		// canvas's one context (releasing it after would unconfigure the
+		// new configuration).
+		sf.setSurface(nil)
 		surf, err := dev.NewSurfaceFromCanvas(sf.canvas, desc)
 		if err != nil {
 			return nil, trap("configure", err), true
 		}
-		sf.surf = surf
+		sf.setSurface(surf)
 		return nil, nil, true
 	case "[method]context.unconfigure":
 		o, err := s.getObj(a[0], "context")
 		if err != nil {
 			return nil, err, true
 		}
-		if sf := o.(*contextObj).sf; sf.surf != nil {
-			sf.surf.Destroy()
-			sf.surf = nil
-		}
+		o.(*contextObj).sf.setSurface(nil)
 		return nil, nil, true
 	case "[method]context.get-current-texture":
 		o, err := s.getObj(a[0], "context")
@@ -392,6 +394,10 @@ func (s *session) createRenderPipeline(a []any) (any, error) {
 	}
 	p, err := d.CreateRenderPipeline(desc)
 	if err != nil {
+		var qe *wg.QuotaError
+		if errors.As(err, &qe) {
+			return nil, Trapf("pipeline quota of %d exceeded", s.lim.Pipelines)
+		}
 		return nil, trap("create-render-pipeline", err)
 	}
 	return s.put("gpu-render-pipeline", p, p.Release)

@@ -65,7 +65,13 @@ func f32bytes(f []float32) []byte {
 const storage = wg.BufferUsageStorage | wg.BufferUsageCopySrc | wg.BufferUsageCopyDst
 
 func (g *gpuDevice) buffer(size int64) (*wg.Buffer, error) {
-	b, err := g.d.CreateBuffer(wg.BufferDescriptor{Size: uint64(max(4, size)), Usage: storage})
+	return g.create(wg.BufferDescriptor{Size: uint64(max(4, size)), Usage: storage})
+}
+
+// create makes a buffer; a quota refusal keeps the "GPU memory quota"
+// message, whatever the buffer is for.
+func (g *gpuDevice) create(desc wg.BufferDescriptor) (*wg.Buffer, error) {
+	b, err := g.d.CreateBuffer(desc)
 	var qe *wg.QuotaError
 	if errors.As(err, &qe) {
 		return nil, fmt.Errorf("GPU memory quota of %d bytes exceeded", g.d.Quota().MemoryBytes)
@@ -101,7 +107,7 @@ func (g *gpuDevice) release(b buf) { b.(*gbuf).b.Destroy() }
 // getMappedRange.
 func (g *gpuDevice) read(b buf, n int64) ([]float32, error) {
 	size := uint64(max(4, 4*n))
-	staging, err := g.d.CreateBuffer(wg.BufferDescriptor{Size: size, Usage: wg.BufferUsageMapRead | wg.BufferUsageCopyDst})
+	staging, err := g.create(wg.BufferDescriptor{Size: size, Usage: wg.BufferUsageMapRead | wg.BufferUsageCopyDst})
 	if err != nil {
 		return nil, err
 	}

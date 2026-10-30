@@ -55,6 +55,9 @@ type Report struct {
 	Adapter wg.AdapterInfo `json:"adapter"`
 	Results []Result       `json:"results"`
 	Error   string         `json:"error,omitempty"`
+	// ConfiguredSurfaces is how many surfaces still hold a WebGPU context
+	// once every container has ended: they all dropped theirs, so 0.
+	ConfiguredSurfaces int64 `json:"configuredSurfaces"`
 }
 
 type buf struct {
@@ -195,5 +198,6 @@ func main() {
 		}
 		rep.Results = append(rep.Results, r)
 	}
+	rep.ConfiguredSurfaces = webgpu.ConfiguredSurfaces()
 	post()
 }
