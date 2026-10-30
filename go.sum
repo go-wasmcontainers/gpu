@@ -3,8 +3,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/deckarep/golang-set/v2 v2.8.0 h1:swm0rlPCmdWn9mESxKOjWk8hXSqoxOp+ZlfuyaAdFlQ=
 github.com/deckarep/golang-set/v2 v2.8.0/go.mod h1:VAky9rY/yGXJOLEDv3OMci+7wtDpOF4IN+y82NBOac4=
-github.com/go-gfx/webgpu v0.0.0-20261029195101-08c9297fa5be h1:Rz/DoTKEjFyukGDX17qjEEK0jm6IMNAz6Co2PyMJWQU=
-github.com/go-gfx/webgpu v0.0.0-20261029195101-08c9297fa5be/go.mod h1:60qAy+J79Ag1Yx5w+kGQUPbtISHuvhy4f/oZAPDeC4Y=
+github.com/go-gfx/webgpu v0.1.0 h1:pbplsGQ9iUjUgsZsUht/rqC9Umkwd0zhFEcStfwJ2ns=
+github.com/go-gfx/webgpu v0.1.0/go.mod h1:60qAy+J79Ag1Yx5w+kGQUPbtISHuvhy4f/oZAPDeC4Y=
 github.com/go-stack/stack v1.8.1 h1:ntEHSVwIt7PNXNpgPmVfMrNhLtgjlmnZha2kOpuRiDw=
 github.com/go-stack/stack v1.8.1/go.mod h1:dcoOX6HbPZSZptuspn9bctJ+N/CnF5gGygcUP3XYfe4=
 github.com/go-wasmcontainers/engine v0.19.0 h1:wQq7a6l1Y9SAnx1gl7GxRU8Gh6VCXXpSxmLkomj+F1k=
