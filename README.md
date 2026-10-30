@@ -38,7 +38,11 @@ component-model runtime; `wasi:webgpu@0.3.0-rc.2` is WIT. So:
   signatures from the WIT), resources as per-process handles. Asynchronous
   functions (`request-adapter`, `map-async`, …) are lowered synchronously
   and run off the host call. `webgpu.Browser{}` maps them to WebGPU in the
-  engine's worker; elsewhere there is no backend: `get-gpu` works and
+  engine's worker through [go-gfx/webgpu](https://github.com/go-gfx/webgpu),
+  the fleet's shared WebGPU library for `GOOS=js` (the wasi-nn GPU backend
+  runs on it too): arguments are range checked before they reach the
+  browser, and each process's memory, pipeline, WGSL and surface limits are
+  a `webgpu.Quota` the library enforces. Elsewhere there is no backend: `get-gpu` works and
   `request-adapter` answers none. A process without `--gpu` gets no
   adapter. Quotas per process: 4096 handles, 256 MiB of buffers, 1 MiB per
   WGSL module, 256 pipelines (traps past them); a submission still running

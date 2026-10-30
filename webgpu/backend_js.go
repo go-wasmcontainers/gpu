@@ -3,17 +3,21 @@
 package webgpu
 
 import (
-	"fmt"
+	"context"
+	"errors"
 	"sync"
 	"syscall/js"
 	"time"
 
-	"github.com/go-wasmcontainers/gpu/internal/jsgpu"
+	wg "github.com/go-gfx/webgpu"
 	"github.com/go-wasmcontainers/gpu/wit"
 )
 
 // Browser is the backend in the browser: WebGPU through the worker's
-// navigator.gpu (the playground's engine worker runs the WASI host).
+// navigator.gpu (the playground's engine worker runs the WASI host), by
+// way of github.com/go-gfx/webgpu. Each process's GPU memory, pipelines,
+// WGSL size and surface size are a wg.Quota the library enforces before
+// the browser is called; the handle count stays this package's (Handles).
 type Browser struct {
 	// AllowFallback offers a software adapter; off by default, since its
 	// work is not GPU work.
@@ -88,9 +92,11 @@ func SurfaceInput(surface uint32, e InputEvent) bool {
 }
 
 // surfaceObj is a container's surface: an OffscreenCanvas in this worker.
+// Its WebGPU side (surf) exists once a context is configured.
 type surfaceObj struct {
 	id     uint32
 	canvas js.Value
+	surf   *wg.Surface
 	last   time.Time
 	emit   func(SurfaceEvent)
 	input  inputHub
@@ -112,8 +118,7 @@ func (s *surfaceObj) Destroy() {
 }
 
 type contextObj struct {
-	ctx js.Value
-	sf  *surfaceObj
+	sf *surfaceObj
 }
 
 func (c *contextObj) Destroy() {}
@@ -129,7 +134,17 @@ func (b Browser) Open(p Process, lim Limits, h *Handles) Session {
 	if b.MaxWidth <= 0 || b.MaxHeight <= 0 {
 		b.MaxWidth, b.MaxHeight = 1920, 1080
 	}
-	return &session{b: b, gpu: p.GPU, container: p.Container, lim: lim, h: h}
+	// One quota per process, shared by every device it requests. No
+	// optional feature and no required limit is listed, so none is ever
+	// granted (timestamp-query included).
+	q := &wg.Quota{
+		MemoryBytes:   lim.MemoryBytes,
+		Pipelines:     lim.Pipelines,
+		ShaderBytes:   lim.ShaderBytes,
+		SurfaceWidth:  b.MaxWidth,
+		SurfaceHeight: b.MaxHeight,
+	}
+	return &session{b: b, gpu: p.GPU, container: p.Container, lim: lim, h: h, quota: q}
 }
 
 type session struct {
@@ -138,10 +153,7 @@ type session struct {
 	container string
 	lim       Limits
 	h         *Handles
-
-	mu        sync.Mutex
-	memory    int64 // buffer bytes alive
-	pipelines int
+	quota     *wg.Quota
 }
 
 var asyncCalls = map[string]bool{
@@ -158,38 +170,59 @@ var asyncCalls = map[string]bool{
 func (s *session) Async(name string) bool { return asyncCalls[name] }
 func (s *session) Close()                 {}
 
-// jsObj is a WebGPU object behind a handle; destroy runs at drop.
-type jsObj struct {
-	v       js.Value
+// obj is a library object behind a handle; destroy runs at drop.
+type obj struct {
+	v       any
 	destroy func()
 }
 
-func (o *jsObj) Destroy() {
+func (o *obj) Destroy() {
 	if o.destroy != nil {
 		o.destroy()
 	}
 }
 
-func (s *session) get(h any, res string) (js.Value, error) {
+// queueObj is a queue with its device, whose timeline the GPU-time
+// watchdog waits on.
+type queueObj struct {
+	q   *wg.Queue
+	dev *wg.Device
+}
+
+// raw returns what a handle holds (nil for an empty one, such as get-gpu
+// without --gpu).
+func (s *session) raw(h any, res string) (any, error) {
 	n, ok := h.(uint32)
 	if !ok {
-		return js.Value{}, Trapf("%s handle is %T", res, h)
+		return nil, Trapf("%s handle is %T", res, h)
 	}
 	o, err := s.h.Get(n, res)
 	if err != nil {
-		return js.Value{}, err
+		return nil, err
 	}
-	if jo, ok := o.(*jsObj); ok && jo != nil {
+	if jo, ok := o.(*obj); ok && jo != nil {
 		return jo.v, nil
 	}
-	return js.Undefined(), nil
+	return nil, nil
 }
 
-func (s *session) put(res string, v js.Value, destroy func()) (any, error) {
-	return s.h.New(res, &jsObj{v: v, destroy: destroy})
+// get returns a handle's library object as a T.
+func get[T any](s *session, h any, res string) (T, error) {
+	var zero T
+	v, err := s.raw(h, res)
+	if err != nil {
+		return zero, err
+	}
+	t, ok := v.(T)
+	if !ok {
+		return zero, Trapf("%s handle holds no object", res)
+	}
+	return t, nil
 }
 
-func obj() js.Value { return js.Global().Get("Object").New() }
+func (s *session) put(res string, v any, destroy func()) (any, error) {
+	return s.h.New(res, &obj{v: v, destroy: destroy})
+}
 
 func u64(v any) uint64 {
 	switch x := v.(type) {
@@ -223,29 +256,47 @@ func errRecord(kind int, msg string) wit.ResultValue {
 
 var okUnit = wit.ResultValue{}
 
+// trap turns a library error on a call the WIT gives no error result into
+// a trap: a refused argument is loud, never a silent device error.
+func trap(op string, err error) error { return Trapf("%s: %v", op, err) }
+
+// dynamicOffsets reads an option<list<u32>>.
+func dynamicOffsets(v any) []uint32 {
+	l, ok := opt(v)
+	if !ok {
+		return nil
+	}
+	xs, _ := l.([]any)
+	out := make([]uint32, len(xs))
+	for i, x := range xs {
+		out[i] = uint32(u64(x))
+	}
+	return out
+}
+
 func (s *session) Call(name string, a []any) (any, error) {
+	ctx := context.Background()
 	switch name {
 	case "get-gpu":
-		gpu := js.Global().Get("navigator").Get("gpu")
-		if !s.gpu || gpu.IsUndefined() || gpu.IsNull() {
+		g, err := wg.Navigator()
+		if !s.gpu || err != nil {
 			return s.h.New("gpu", nil)
 		}
-		return s.put("gpu", gpu, nil)
+		return s.put("gpu", g, nil)
 	case "[method]gpu.request-adapter":
-		g, err := s.get(a[0], "gpu")
+		v, err := s.raw(a[0], "gpu")
 		if err != nil {
 			return nil, err
 		}
-		if g.IsUndefined() {
+		g, ok := v.(*wg.GPU)
+		if !ok {
 			return nil, nil // no --gpu, or no WebGPU: none
 		}
-		ad, err := jsgpu.Await(g.Call("requestAdapter"))
-		if err != nil || ad.IsNull() || ad.IsUndefined() {
+		// A fallback adapter is refused unless allowed: a software
+		// adapter is not offered as a GPU.
+		ad, err := g.RequestAdapter(ctx, &wg.RequestAdapterOptions{AllowFallback: s.b.AllowFallback})
+		if err != nil {
 			return nil, nil
-		}
-		fb := ad.Get("info").Get("isFallbackAdapter")
-		if fb.Type() == js.TypeBoolean && fb.Bool() && !s.b.AllowFallback {
-			return nil, nil // a software adapter is not offered as a GPU
 		}
 		h, err := s.put("gpu-adapter", ad, nil)
 		if err != nil {
@@ -254,8 +305,8 @@ func (s *session) Call(name string, a []any) (any, error) {
 		return wit.Some{Value: h}, nil
 	case "[method]gpu.get-preferred-canvas-format":
 		f := "bgra8unorm"
-		if g := js.Global().Get("navigator").Get("gpu"); !g.IsUndefined() {
-			f = g.Call("getPreferredCanvasFormat").String()
+		if g, err := wg.Navigator(); err == nil {
+			f = string(g.PreferredCanvasFormat())
 		}
 		return formatIndex(f), nil
 	case "[method]gpu.wgsl-language-features":
@@ -263,7 +314,7 @@ func (s *session) Call(name string, a []any) (any, error) {
 	case "[method]wgsl-language-features.has":
 		return false, nil
 	case "[method]gpu-adapter.request-device":
-		ad, err := s.get(a[0], "gpu-adapter")
+		ad, err := get[*wg.Adapter](s, a[0], "gpu-adapter")
 		if err != nil {
 			return nil, err
 		}
@@ -275,56 +326,56 @@ func (s *session) Call(name string, a []any) (any, error) {
 				return errRecord(0, "required limits are not offered to containers"), nil
 			}
 		}
-		dev, err := jsgpu.Await(ad.Call("requestDevice"))
+		dev, err := ad.RequestDevice(ctx, &wg.DeviceDescriptor{Quota: s.quota})
 		if err != nil {
 			return errRecord(1, err.Error()), nil
 		}
-		h, err := s.put("gpu-device", dev, func() { dev.Call("destroy") })
+		h, err := s.put("gpu-device", dev, dev.Destroy)
 		if err != nil {
-			dev.Call("destroy")
+			dev.Destroy()
 			return nil, err
 		}
 		return wit.ResultValue{Value: h}, nil
 	case "[method]gpu-device.queue":
-		d, err := s.get(a[0], "gpu-device")
+		d, err := get[*wg.Device](s, a[0], "gpu-device")
 		if err != nil {
 			return nil, err
 		}
-		return s.put("gpu-queue", d.Get("queue"), nil)
+		return s.put("gpu-queue", queueObj{q: d.Queue(), dev: d}, nil)
 	case "[method]gpu-device.destroy":
-		d, err := s.get(a[0], "gpu-device")
+		d, err := get[*wg.Device](s, a[0], "gpu-device")
 		if err != nil {
 			return nil, err
 		}
-		d.Call("destroy")
+		d.Destroy()
 		return nil, nil
 	case "[method]gpu-device.create-buffer":
 		return s.createBuffer(a)
 	case "[method]gpu-buffer.size":
-		b, err := s.get(a[0], "gpu-buffer")
+		b, err := get[*wg.Buffer](s, a[0], "gpu-buffer")
 		if err != nil {
 			return nil, err
 		}
-		return uint64(b.Get("size").Float()), nil
+		return b.Size(), nil
 	case "[method]gpu-buffer.usage":
-		b, err := s.get(a[0], "gpu-buffer")
+		b, err := get[*wg.Buffer](s, a[0], "gpu-buffer")
 		if err != nil {
 			return nil, err
 		}
-		return uint64(b.Get("usage").Int()), nil
+		return uint64(b.Usage()), nil
 	case "[method]gpu-buffer.destroy":
-		b, err := s.get(a[0], "gpu-buffer")
+		b, err := get[*wg.Buffer](s, a[0], "gpu-buffer")
 		if err != nil {
 			return nil, err
 		}
-		b.Call("destroy")
+		b.Destroy()
 		return nil, nil
 	case "[method]gpu-queue.write-buffer-with-copy":
-		q, err := s.get(a[0], "gpu-queue")
+		q, err := get[queueObj](s, a[0], "gpu-queue")
 		if err != nil {
 			return nil, err
 		}
-		b, err := s.get(a[1], "gpu-buffer")
+		b, err := get[*wg.Buffer](s, a[1], "gpu-buffer")
 		if err != nil {
 			return nil, err
 		}
@@ -341,73 +392,87 @@ func (s *session) Call(name string, a []any) (any, error) {
 			}
 			data = data[:u64(sz)]
 		}
-		u := js.Global().Get("Uint8Array").New(len(data))
-		js.CopyBytesToJS(u, data)
-		q.Call("writeBuffer", b, float64(u64(a[2])), u)
+		// Range, alignment and COPY_DST are checked by the library: an
+		// out-of-range write is an error result, not a device error.
+		if err := q.q.WriteBuffer(b, u64(a[2]), data); err != nil {
+			return errRecord(0, err.Error()), nil
+		}
 		return okUnit, nil
 	case "[method]gpu-device.create-shader-module":
-		d, err := s.get(a[0], "gpu-device")
+		d, err := get[*wg.Device](s, a[0], "gpu-device")
 		if err != nil {
 			return nil, err
 		}
 		code, _ := record(a[1])[0].(string)
-		if len(code) > s.lim.ShaderBytes {
-			return nil, Trapf("WGSL source of %d bytes (quota %d)", len(code), s.lim.ShaderBytes)
+		m, err := d.CreateShaderModule(wg.ShaderModuleDescriptor{Code: code})
+		if err != nil {
+			var qe *wg.QuotaError
+			if errors.As(err, &qe) {
+				return nil, Trapf("WGSL source of %d bytes (quota %d)", len(code), s.lim.ShaderBytes)
+			}
+			return nil, trap("create-shader-module", err)
 		}
-		desc := obj()
-		desc.Set("code", code)
-		return s.put("gpu-shader-module", d.Call("createShaderModule", desc), nil)
+		return s.put("gpu-shader-module", m, nil)
 	case "[method]gpu-device.create-compute-pipeline":
 		return s.createComputePipeline(a)
 	case "[method]gpu-compute-pipeline.get-bind-group-layout":
-		p, err := s.get(a[0], "gpu-compute-pipeline")
+		p, err := get[*wg.ComputePipeline](s, a[0], "gpu-compute-pipeline")
 		if err != nil {
 			return nil, err
 		}
-		return s.put("gpu-bind-group-layout", p.Call("getBindGroupLayout", u64(a[1])), nil)
+		l, err := p.GetBindGroupLayout(uint32(u64(a[1])))
+		if err != nil {
+			return nil, trap("get-bind-group-layout", err)
+		}
+		return s.put("gpu-bind-group-layout", l, nil)
 	case "[method]gpu-device.create-bind-group":
 		return s.createBindGroup(a)
 	case "[method]gpu-device.create-command-encoder":
-		d, err := s.get(a[0], "gpu-device")
+		d, err := get[*wg.Device](s, a[0], "gpu-device")
 		if err != nil {
 			return nil, err
 		}
-		return s.put("gpu-command-encoder", d.Call("createCommandEncoder"), nil)
+		e, err := d.CreateCommandEncoder("")
+		if err != nil {
+			return nil, trap("create-command-encoder", err)
+		}
+		return s.put("gpu-command-encoder", e, nil)
 	case "[method]gpu-command-encoder.begin-compute-pass":
-		e, err := s.get(a[0], "gpu-command-encoder")
+		e, err := get[*wg.CommandEncoder](s, a[0], "gpu-command-encoder")
 		if err != nil {
 			return nil, err
 		}
-		return s.put("gpu-compute-pass-encoder", e.Call("beginComputePass"), nil)
+		p, err := e.BeginComputePass("")
+		if err != nil {
+			return nil, trap("begin-compute-pass", err)
+		}
+		return s.put("gpu-compute-pass-encoder", p, nil)
 	case "[method]gpu-compute-pass-encoder.set-pipeline":
-		pe, err := s.get(a[0], "gpu-compute-pass-encoder")
+		pe, err := get[*wg.ComputePassEncoder](s, a[0], "gpu-compute-pass-encoder")
 		if err != nil {
 			return nil, err
 		}
-		p, err := s.get(a[1], "gpu-compute-pipeline")
+		p, err := get[*wg.ComputePipeline](s, a[1], "gpu-compute-pipeline")
 		if err != nil {
 			return nil, err
 		}
-		pe.Call("setPipeline", p)
+		pe.SetPipeline(p)
 		return nil, nil
 	case "[method]gpu-compute-pass-encoder.set-bind-group":
-		pe, err := s.get(a[0], "gpu-compute-pass-encoder")
+		pe, err := get[*wg.ComputePassEncoder](s, a[0], "gpu-compute-pass-encoder")
 		if err != nil {
 			return nil, err
 		}
-		bg := js.Null()
+		var bg *wg.BindGroup
 		if h, ok := opt(a[2]); ok {
-			if bg, err = s.get(h, "gpu-bind-group"); err != nil {
+			if bg, err = get[*wg.BindGroup](s, h, "gpu-bind-group"); err != nil {
 				return nil, err
 			}
 		}
-		if _, ok := opt(a[3]); ok {
-			return errRecord(0, "dynamic offsets are not supported"), nil
-		}
-		pe.Call("setBindGroup", u64(a[1]), bg)
+		pe.SetBindGroup(uint32(u64(a[1])), bg, dynamicOffsets(a[3])...)
 		return okUnit, nil
 	case "[method]gpu-compute-pass-encoder.dispatch-workgroups":
-		pe, err := s.get(a[0], "gpu-compute-pass-encoder")
+		pe, err := get[*wg.ComputePassEncoder](s, a[0], "gpu-compute-pass-encoder")
 		if err != nil {
 			return nil, err
 		}
@@ -418,25 +483,27 @@ func (s *session) Call(name string, a []any) (any, error) {
 		if v, ok := opt(a[3]); ok {
 			z = u64(v)
 		}
-		pe.Call("dispatchWorkgroups", u64(a[1]), y, z)
+		pe.DispatchWorkgroups(uint32(u64(a[1])), uint32(y), uint32(z))
 		return nil, nil
 	case "[method]gpu-compute-pass-encoder.end":
-		pe, err := s.get(a[0], "gpu-compute-pass-encoder")
+		pe, err := get[*wg.ComputePassEncoder](s, a[0], "gpu-compute-pass-encoder")
 		if err != nil {
 			return nil, err
 		}
-		pe.Call("end")
+		if err := pe.End(); err != nil {
+			return nil, trap("compute pass end", err)
+		}
 		return nil, nil
 	case "[method]gpu-command-encoder.copy-buffer-to-buffer":
-		e, err := s.get(a[0], "gpu-command-encoder")
+		e, err := get[*wg.CommandEncoder](s, a[0], "gpu-command-encoder")
 		if err != nil {
 			return nil, err
 		}
-		src, err := s.get(a[1], "gpu-buffer")
+		src, err := get[*wg.Buffer](s, a[1], "gpu-buffer")
 		if err != nil {
 			return nil, err
 		}
-		dst, err := s.get(a[3], "gpu-buffer")
+		dst, err := get[*wg.Buffer](s, a[3], "gpu-buffer")
 		if err != nil {
 			return nil, err
 		}
@@ -447,83 +514,81 @@ func (s *session) Call(name string, a []any) (any, error) {
 		if v, ok := opt(a[4]); ok {
 			do = u64(v)
 		}
-		size := uint64(src.Get("size").Float()) - so
+		if so > src.Size() {
+			return nil, Trapf("copy-buffer-to-buffer: source offset %d past %d bytes", so, src.Size())
+		}
+		size := src.Size() - so
 		if v, ok := opt(a[5]); ok {
 			size = u64(v)
 		}
-		e.Call("copyBufferToBuffer", src, float64(so), dst, float64(do), float64(size))
+		if err := e.CopyBufferToBuffer(src, so, dst, do, size); err != nil {
+			return nil, trap("copy-buffer-to-buffer", err)
+		}
 		return nil, nil
 	case "[method]gpu-command-encoder.finish":
-		e, err := s.get(a[0], "gpu-command-encoder")
+		e, err := get[*wg.CommandEncoder](s, a[0], "gpu-command-encoder")
 		if err != nil {
 			return nil, err
 		}
-		return s.put("gpu-command-buffer", e.Call("finish"), nil)
+		cb, err := e.Finish()
+		if err != nil {
+			return nil, trap("finish", err)
+		}
+		return s.put("gpu-command-buffer", cb, nil)
 	case "[method]gpu-queue.submit":
 		return s.submit(a)
 	case "[method]gpu-queue.on-submitted-work-done":
-		q, err := s.get(a[0], "gpu-queue")
+		q, err := get[queueObj](s, a[0], "gpu-queue")
 		if err != nil {
 			return nil, err
 		}
-		_, err = jsgpu.Await(q.Call("onSubmittedWorkDone"))
-		return nil, err
+		return nil, q.q.OnSubmittedWorkDone(ctx)
 	case "[method]gpu-buffer.map-async":
-		b, err := s.get(a[0], "gpu-buffer")
+		b, err := get[*wg.Buffer](s, a[0], "gpu-buffer")
 		if err != nil {
 			return nil, err
 		}
-		mode := u64(a[1]) & 3
-		args := []any{mode}
-		off, hasOff := opt(a[2])
-		if hasOff {
-			args = append(args, float64(u64(off)))
+		var off, size uint64
+		if v, ok := opt(a[2]); ok {
+			off = u64(v)
 		}
-		if sz, ok := opt(a[3]); ok {
-			if !hasOff {
-				args = append(args, 0)
-			}
-			args = append(args, float64(u64(sz)))
+		if v, ok := opt(a[3]); ok {
+			size = u64(v) // 0 maps to the end, as the library defines it
 		}
-		if _, err := jsgpu.Await(b.Call("mapAsync", args...)); err != nil {
+		if err := b.MapAsync(ctx, wg.MapMode(u64(a[1])&3), off, size); err != nil {
 			return errRecord(0, err.Error()), nil
 		}
 		return okUnit, nil
 	case "[method]gpu-buffer.get-mapped-range-get-with-copy":
-		b, err := s.get(a[0], "gpu-buffer")
+		b, err := get[*wg.Buffer](s, a[0], "gpu-buffer")
 		if err != nil {
 			return nil, err
 		}
-		var r js.Value
-		var cerr error
-		func() {
-			defer func() {
-				if p := recover(); p != nil {
-					cerr = fmt.Errorf("%v", p)
-				}
-			}()
-			args := []any{}
-			if v, ok := opt(a[1]); ok {
-				args = append(args, float64(u64(v)))
-				if v, ok := opt(a[2]); ok {
-					args = append(args, float64(u64(v)))
-				}
-			}
-			r = b.Call("getMappedRange", args...)
-		}()
-		if cerr != nil {
-			return errRecord(0, cerr.Error()), nil
+		var off uint64
+		if v, ok := opt(a[1]); ok {
+			off = u64(v)
 		}
-		u := js.Global().Get("Uint8Array").New(r)
-		out := make([]byte, u.Get("length").Int())
-		js.CopyBytesToGo(out, u)
+		if off > b.Size() {
+			return errRecord(0, "offset past the buffer"), nil
+		}
+		size := b.Size() - off
+		if v, ok := opt(a[2]); ok {
+			size = u64(v)
+		}
+		if size > b.Size() {
+			return errRecord(0, "size past the buffer"), nil
+		}
+		out := make([]byte, size)
+		if err := b.ReadMapped(off, out); err != nil {
+			return errRecord(0, err.Error()), nil
+		}
 		return wit.ResultValue{Value: out}, nil
 	case "[method]gpu-buffer.unmap":
-		b, err := s.get(a[0], "gpu-buffer")
+		b, err := get[*wg.Buffer](s, a[0], "gpu-buffer")
 		if err != nil {
 			return nil, err
 		}
-		b.Call("unmap")
+		_ = b.Unmap()
 		return okUnit, nil
 	}
 	if v, err, ok := s.render(name, a); ok {
@@ -533,159 +598,130 @@ func (s *session) Call(name string, a []any) (any, error) {
 }
 
 func (s *session) createBuffer(a []any) (any, error) {
-	d, err := s.get(a[0], "gpu-device")
+	d, err := get[*wg.Device](s, a[0], "gpu-device")
 	if err != nil {
 		return nil, err
 	}
 	r := record(a[1])
-	size := int64(u64(r[0]))
-	s.mu.Lock()
-	if size < 0 || size > s.lim.MemoryBytes-s.memory {
-		s.mu.Unlock()
-		return nil, Trapf("GPU memory quota of %d bytes exceeded (buffer of %d)", s.lim.MemoryBytes, size)
-	}
-	s.memory += size
-	s.mu.Unlock()
-	desc := obj()
-	desc.Set("size", float64(size))
-	desc.Set("usage", int(u64(r[1])))
+	desc := wg.BufferDescriptor{Size: u64(r[0]), Usage: wg.BufferUsage(u64(r[1]))}
 	if m, ok := opt(r[2]); ok {
-		desc.Set("mappedAtCreation", m.(bool))
+		desc.MappedAtCreation, _ = m.(bool)
 	}
-	buf := d.Call("createBuffer", desc)
-	h, err := s.put("gpu-buffer", buf, func() {
-		buf.Call("destroy")
-		s.mu.Lock()
-		s.memory -= size
-		s.mu.Unlock()
-	})
+	buf, err := d.CreateBuffer(desc)
 	if err != nil {
-		buf.Call("destroy")
-		s.mu.Lock()
-		s.memory -= size
-		s.mu.Unlock()
+		var qe *wg.QuotaError
+		if errors.As(err, &qe) {
+			return nil, Trapf("GPU memory quota of %d bytes exceeded (buffer of %d)", s.lim.MemoryBytes, desc.Size)
+		}
+		return nil, trap("create-buffer", err)
+	}
+	h, err := s.put("gpu-buffer", buf, buf.Destroy)
+	if err != nil {
+		buf.Destroy()
 	}
 	return h, err
 }
 
 func (s *session) createComputePipeline(a []any) (any, error) {
-	d, err := s.get(a[0], "gpu-device")
+	d, err := get[*wg.Device](s, a[0], "gpu-device")
 	if err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	if s.pipelines >= s.lim.Pipelines {
-		s.mu.Unlock()
-		return nil, Trapf("pipeline quota of %d exceeded", s.lim.Pipelines)
-	}
-	s.pipelines++
-	s.mu.Unlock()
 	r := record(a[1])
 	stage := record(r[0])
-	mod, err := s.get(stage[0], "gpu-shader-module")
+	mod, err := get[*wg.ShaderModule](s, stage[0], "gpu-shader-module")
 	if err != nil {
 		return nil, err
 	}
-	comp := obj()
-	comp.Set("module", mod)
+	desc := wg.ComputePipelineDescriptor{Compute: wg.ProgrammableStage{Module: mod}}
 	if e, ok := opt(stage[1]); ok {
-		comp.Set("entryPoint", e.(string))
+		desc.Compute.EntryPoint, _ = e.(string)
 	}
-	desc := obj()
-	desc.Set("compute", comp)
-	lm, _ := r[1].(wit.VariantValue)
-	if lm.Case == 0 {
-		pl, err := s.get(lm.Value, "gpu-pipeline-layout")
-		if err != nil {
+	if lm, _ := r[1].(wit.VariantValue); lm.Case == 0 {
+		if desc.Layout, err = get[*wg.PipelineLayout](s, lm.Value, "gpu-pipeline-layout"); err != nil {
 			return nil, err
 		}
-		desc.Set("layout", pl)
-	} else {
-		desc.Set("layout", "auto")
 	}
-	p := d.Call("createComputePipeline", desc)
-	return s.put("gpu-compute-pipeline", p, func() {
-		s.mu.Lock()
-		s.pipelines--
-		s.mu.Unlock()
-	})
+	p, err := d.CreateComputePipeline(desc)
+	if err != nil {
+		var qe *wg.QuotaError
+		if errors.As(err, &qe) {
+			return nil, Trapf("pipeline quota of %d exceeded", s.lim.Pipelines)
+		}
+		return nil, trap("create-compute-pipeline", err)
+	}
+	return s.put("gpu-compute-pipeline", p, p.Release)
 }
 
 func (s *session) createBindGroup(a []any) (any, error) {
-	d, err := s.get(a[0], "gpu-device")
+	d, err := get[*wg.Device](s, a[0], "gpu-device")
 	if err != nil {
 		return nil, err
 	}
 	r := record(a[1])
-	layout, err := s.get(r[0], "gpu-bind-group-layout")
+	layout, err := get[*wg.BindGroupLayout](s, r[0], "gpu-bind-group-layout")
 	if err != nil {
 		return nil, err
 	}
-	var entries []any
+	var entries []wg.BindGroupEntry
 	for _, e := range r[1].([]any) {
 		er := record(e)
-		ent := obj()
-		ent.Set("binding", u64(er[0]))
-		res := obj()
+		ent := wg.BindGroupEntry{Binding: uint32(u64(er[0]))}
 		v, _ := er[1].(wit.VariantValue)
 		switch v.Case {
 		case 0:
-			b, err := s.get(v.Value, "gpu-buffer")
-			if err != nil {
+			if ent.Buffer, err = get[*wg.Buffer](s, v.Value, "gpu-buffer"); err != nil {
 				return nil, err
 			}
-			res.Set("buffer", b)
 		case 1:
 			bb := record(v.Value)
-			b, err := s.get(bb[0], "gpu-buffer")
-			if err != nil {
+			if ent.Buffer, err = get[*wg.Buffer](s, bb[0], "gpu-buffer"); err != nil {
 				return nil, err
 			}
-			res.Set("buffer", b)
 			if o, ok := opt(bb[1]); ok {
-				res.Set("offset", float64(u64(o)))
+				ent.Offset = u64(o)
 			}
 			if z, ok := opt(bb[2]); ok {
-				res.Set("size", float64(u64(z)))
+				ent.Size = u64(z)
 			}
 		default:
 			return nil, Trapf("bind group resources other than buffers are not implemented yet")
 		}
-		ent.Set("resource", res)
 		entries = append(entries, ent)
 	}
-	desc := obj()
-	desc.Set("layout", layout)
-	desc.Set("entries", entries)
-	return s.put("gpu-bind-group", d.Call("createBindGroup", desc), nil)
+	g, err := d.CreateBindGroup(wg.BindGroupDescriptor{Layout: layout, Entries: entries})
+	if err != nil {
+		return nil, trap("create-bind-group", err)
+	}
+	return s.put("gpu-bind-group", g, nil)
 }
 
 // submit queues command buffers and arms the GPU-time watchdog: a queue
-// still busy after GPUTime has its device destroyed (the WebGPU spec's own
-// watchdog may otherwise take seconds and stall the page).
+// still busy after GPUTime has its process's devices destroyed (the
+// WebGPU spec's own watchdog may otherwise take seconds and stall the
+// page). It waits on the device's submission timeline, so many
+// submissions share one onSubmittedWorkDone round trip.
 func (s *session) submit(a []any) (any, error) {
-	q, err := s.get(a[0], "gpu-queue")
+	q, err := get[queueObj](s, a[0], "gpu-queue")
 	if err != nil {
 		return nil, err
 	}
-	var cbs []any
+	var cbs []*wg.CommandBuffer
 	for _, h := range a[1].([]any) {
-		cb, err := s.get(h, "gpu-command-buffer")
+		cb, err := get[*wg.CommandBuffer](s, h, "gpu-command-buffer")
 		if err != nil {
 			return nil, err
 		}
 		cbs = append(cbs, cb)
 	}
-	q.Call("submit", cbs)
-	done := make(chan struct{})
+	if err := q.q.Submit(cbs...); err != nil {
+		return nil, trap("submit", err)
+	}
+	seq := q.dev.Submitted()
 	go func() {
-		jsgpu.Await(q.Call("onSubmittedWorkDone"))
-		close(done)
-	}()
-	go func() {
-		select {
-		case <-done:
-		case <-time.After(s.b.GPUTime):
+		ctx, cancel := context.WithTimeout(context.Background(), s.b.GPUTime)
+		defer cancel()
+		if err := q.dev.WaitSubmitted(ctx, seq); errors.Is(err, context.DeadlineExceeded) {
 			s.loseDevices()
 		}
 	}()
@@ -695,16 +731,18 @@ func (s *session) submit(a []any) (any, error) {
 // loseDevices destroys every device of the process (GPU time exceeded).
 func (s *session) loseDevices() {
 	s.h.mu.Lock()
-	var devs []*jsObj
+	var devs []*wg.Device
 	for _, e := range s.h.tab {
 		if e.res == "gpu-device" {
-			if o, ok := e.obj.(*jsObj); ok {
-				devs = append(devs, o)
+			if o, ok := e.obj.(*obj); ok {
+				if d, ok := o.v.(*wg.Device); ok {
+					devs = append(devs, d)
+				}
 			}
 		}
 	}
 	s.h.mu.Unlock()
 	for _, d := range devs {
-		d.v.Call("destroy")
+		d.Destroy()
 	}
 }

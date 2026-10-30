@@ -21,11 +21,11 @@ import (
 	"syscall/js"
 	"time"
 
+	wg "github.com/go-gfx/webgpu"
 	"github.com/go-wasmcontainers/engine/rootfs"
 	"github.com/go-wasmcontainers/engine/runtime"
 	"github.com/go-wasmcontainers/engine/runtime/browser"
 	"github.com/go-wasmcontainers/engine/wasi"
-	"github.com/go-wasmcontainers/gpu/internal/jsgpu"
 	"github.com/go-wasmcontainers/gpu/nn"
 	nnwebgpu "github.com/go-wasmcontainers/gpu/nn/webgpu"
 	"github.com/go-wasmcontainers/gpu/onnx"
@@ -52,9 +52,9 @@ type Result struct {
 
 // Report is what the worker posts.
 type Report struct {
-	Adapter jsgpu.AdapterInfo `json:"adapter"`
-	Results []Result          `json:"results"`
-	Error   string            `json:"error,omitempty"`
+	Adapter wg.AdapterInfo `json:"adapter"`
+	Results []Result       `json:"results"`
+	Error   string         `json:"error,omitempty"`
 }
 
 type buf struct {
@@ -101,9 +101,10 @@ func main() {
 		return
 	}
 	allow := js.Global().Get("location").Get("search").String() == "?fallback=1"
-	if d, err := jsgpu.NewDevice(true); err == nil {
-		rep.Adapter = d.Info
-		d.Destroy()
+	if g, err := wg.Navigator(); err == nil {
+		if a, err := g.RequestAdapter(context.Background(), &wg.RequestAdapterOptions{AllowFallback: true}); err == nil {
+			rep.Adapter = a.Info()
+		}
 	}
 	nnMod := nn.NewModule()
 	nnMod.Backends = append(nnMod.Backends, nnwebgpu.Backend{Limits: onnx.DefaultLimits, AllowFallback: allow})
