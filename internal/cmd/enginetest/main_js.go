@@ -75,6 +75,14 @@ func fetch(url string) ([]byte, error) {
 }
 
 func main() {
+	// Never exit: the page keeps sending frame acknowledgements and input
+	// after the report, and wasm_exec.js throws "Go program has already
+	// exited" for any js.FuncOf callback once main has returned (Go's
+	// _makeFuncWrapper calls _resume, which throws when exited). That
+	// race made the e2e flaky (the error replaced the report); the
+	// playground's engine worker lives as long as its page, and so does
+	// this one.
+	defer func() { select {} }()
 	var rep Report
 	post := func() {
 		b, _ := json.Marshal(rep)
