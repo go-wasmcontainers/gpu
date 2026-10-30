@@ -11,6 +11,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,7 +21,7 @@ import (
 	"syscall/js"
 	"time"
 
-	"github.com/go-wasmcontainers/gpu/internal/jsgpu"
+	wg "github.com/go-gfx/webgpu"
 	"github.com/go-wasmcontainers/gpu/nn"
 	"github.com/go-wasmcontainers/gpu/nn/webgpu"
 	"github.com/go-wasmcontainers/gpu/onnx"
@@ -45,9 +46,22 @@ type Result struct {
 
 // Report is what the worker posts.
 type Report struct {
-	Adapter jsgpu.AdapterInfo `json:"adapter"`
-	Results []Result          `json:"results"`
-	Error   string            `json:"error,omitempty"`
+	Adapter wg.AdapterInfo `json:"adapter"`
+	Results []Result       `json:"results"`
+	Error   string         `json:"error,omitempty"`
+}
+
+// adapterInfo describes the adapter this browser offers, fallback or not.
+func adapterInfo() (wg.AdapterInfo, error) {
+	g, err := wg.Navigator()
+	if err != nil {
+		return wg.AdapterInfo{}, err
+	}
+	a, err := g.RequestAdapter(context.Background(), &wg.RequestAdapterOptions{AllowFallback: true})
+	if err != nil {
+		return wg.AdapterInfo{}, err
+	}
+	return a.Info(), nil
 }
 
 func fetch(url string) ([]byte, error) {
@@ -144,14 +158,13 @@ func main() {
 		return
 	}
 	allow := js.Global().Get("location").Get("search").String() == "?fallback=1"
-	d, err := jsgpu.NewDevice(true) // report the adapter whatever it is
+	info, err := adapterInfo() // report the adapter whatever it is
 	if err != nil {
 		rep.Error = "no WebGPU adapter: " + err.Error()
 		post()
 		return
 	}
-	rep.Adapter = d.Info
-	d.Destroy()
+	rep.Adapter = info
 	be := webgpu.Backend{Limits: onnx.DefaultLimits, AllowFallback: allow}
 	for _, c := range cases {
 		rep.Results = append(rep.Results, runCase(be, c))

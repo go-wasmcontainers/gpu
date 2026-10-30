@@ -48,6 +48,11 @@ unmitigated [webgpu-sec].
 So the host mediates every call (no object reaches a guest except as a handle
 in a per-process table, like file descriptors) and enforces:
 
+The WebGPU calls go through [go-gfx/webgpu](https://github.com/go-gfx/webgpu),
+the fleet's shared library for `GOOS=js`: GPU memory, pipelines, WGSL size and
+surface size are one `webgpu.Quota` per process, charged by the library before
+the browser is called; the handle count stays this repository's table.
+
 | Quota (default, per container) | Enforced where |
 |---|---|
 | Handles: 4096 live objects | handle table |

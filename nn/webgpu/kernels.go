@@ -4,7 +4,7 @@ package webgpu
 // element (per row for Softmax). Shapes and strides travel in a "meta"
 // storage buffer of u32 (floats as their bits), so one compiled pipeline
 // serves every shape. Dispatches lay invocations over x and y; the linear
-// index is x + y * 65535 * 64 (jsgpu.Dispatch).
+// index is x + y * 65535 * 64 (gpuDevice.run).
 //
 // Every kernel is checked against the CPU operators of package onnx on the
 // ONNX node tests (e2e, in a browser).

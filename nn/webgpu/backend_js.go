@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/go-wasmcontainers/gpu/internal/jsgpu"
+	wg "github.com/go-gfx/webgpu"
 	"github.com/go-wasmcontainers/gpu/nn"
 	"github.com/go-wasmcontainers/gpu/onnx"
 )
@@ -56,28 +56,27 @@ func (b Backend) Load(builders [][]byte, _ nn.Target) (nn.Graph, nn.Errno) {
 		}
 		return nil, nn.InvalidEncoding
 	}
-	d, err := jsgpu.NewDevice(b.AllowFallback)
-	if err != nil {
-		return nil, nn.UnsupportedOperation // no GPU here: never the CPU instead
-	}
 	mem := b.MemoryBytes
 	if mem <= 0 {
 		mem = 256 << 20
 	}
-	return &graph{s: s, dev: d, mem: mem}, nn.Success
+	d, err := newGPUDevice(b.AllowFallback, mem)
+	if err != nil {
+		return nil, nn.UnsupportedOperation // no GPU here: never the CPU instead
+	}
+	return &graph{s: s, dev: d}, nn.Success
 }
 
 type graph struct {
 	s   *onnx.Session
-	dev *jsgpu.Device
-	mem int64
+	dev *gpuDevice
 }
 
 // Info is the adapter the graph runs on (for logs and tests).
-func (g *graph) Info() jsgpu.AdapterInfo { return g.dev.Info }
+func (g *graph) Info() wg.AdapterInfo { return g.dev.info }
 
 // Close implements nn's optional closer: the device and all it holds go.
-func (g *graph) Close() { g.dev.Destroy() }
+func (g *graph) Close() { g.dev.d.Destroy() }
 
 func (g *graph) NewContext() (nn.Context, nn.Errno) {
 	return &context{g: g, in: map[string]*onnx.Tensor{}}, nn.Success
@@ -121,7 +120,7 @@ func planKey(in map[string]*onnx.Tensor) string {
 }
 
 func (c *context) Compute() nn.Errno {
-	if c.g.dev.Lost() {
+	if c.g.dev.lost() {
 		return nn.RuntimeError
 	}
 	key := planKey(c.in)
@@ -131,7 +130,7 @@ func (c *context) Compute() nn.Errno {
 			return nn.InvalidArgument
 		}
 		if c.gd == nil {
-			c.gd = newGPUDevice(c.g.dev, c.g.mem)
+			c.gd = c.g.dev
 		}
 		if c.exec != nil {
 			for _, k := range c.exec.consts {
