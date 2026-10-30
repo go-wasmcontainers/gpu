@@ -87,7 +87,12 @@ beside `wasi_snapshot_preview1`:
 **playground** — the engine worker registers this repository's browser host
 (`GOOS=js`, `syscall/js` on `navigator.gpu`); posts each container's
 `ImageBitmap` frames to the page; CSP unchanged (no network fetch for models:
-they come from the image's filesystem).
+they come from the image's filesystem). The engine worker's Go program must
+not return from `main` while the page can still message it (frame
+acknowledgements, input): once a Go wasm program has exited, wasm_exec.js
+throws "Go program has already exited" from every `js.FuncOf` callback.
+That is what made the e2e flaky on Chromium 151 (the test harness returned
+after its report; `e2e/engine_test.go` now sends late messages on purpose).
 
 **dashboard** — a **surface pane** per container surface: draws the latest
 `ImageBitmap` scaled into the pane (go-widgets webcanvas needs an image-from-

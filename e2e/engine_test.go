@@ -70,7 +70,14 @@ w.onmessage = (e) => {
     }
   }
 };
-w.onerror = (e) => { window.__report = JSON.stringify({error: "worker: " + e.message}); };
+// A worker error is recorded on its own: it must not replace a report that
+// already arrived (as when a late message hit a Go program that had
+// exited), and it fails the test either way.
+w.onerror = (e) => {
+  window.__workerErrors = (window.__workerErrors || []).concat(e.message);
+  if (window.__report === undefined) window.__report = JSON.stringify({error: "worker: " + e.message});
+};
+window.__worker = w;
 </script>`
 
 type surfaceLog struct {
@@ -201,6 +208,21 @@ func TestContainersOnWebGPU(t *testing.T) {
 	}
 	if rep.Error != "" {
 		t.Fatalf("engine worker: %s", rep.Error)
+	}
+	// The page keeps talking to the worker after the report (a frame
+	// acknowledgement or an input event can still be in flight, as from a
+	// dashboard): the worker must still answer, not throw "Go program has
+	// already exited". A late message is sent on purpose.
+	late, err := p.Evaluate(`new Promise((done) => {
+	  window.__worker.postMessage({t: "frame-ack", surface: 1, seq: 1e6});
+	  window.__worker.postMessage({t: "input", surface: 1, kind: "pointer-move", x: 1, y: 1});
+	  setTimeout(() => done(JSON.stringify(window.__workerErrors || [])), 500);
+	})`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if late != "[]" {
+		t.Errorf("worker errors after its report: %v", late)
 	}
 	a := rep.Adapter
 	what := "GPU"
