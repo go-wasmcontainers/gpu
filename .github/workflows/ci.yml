@@ -149,9 +149,9 @@ jobs:
         run: |
           echo "PLAYWRIGHT_DRIVER_PATH=$RUNNER_TEMP/pwdriver" >> "$GITHUB_ENV"
           echo "PLAYWRIGHT_NODEJS_PATH=$(command -v node)" >> "$GITHUB_ENV"
-          go run github.com/go-wasmcontainers/playground/cmd/site@v0.2.0 playwright-driver --dir "$RUNNER_TEMP/pwdriver"
+          go run github.com/go-wasmcontainers/playground/cmd/site@v0.2.0 playwright-driver --version 1.62.1 --dir "$RUNNER_TEMP/pwdriver"
           PLAYWRIGHT_DRIVER_PATH="$RUNNER_TEMP/pwdriver" PLAYWRIGHT_NODEJS_PATH="$(command -v node)" \
-            go run github.com/playwright-community/playwright-go/cmd/playwright install --with-deps chromium
+            go run github.com/mxschmitt/playwright-go/cmd/playwright install --with-deps chromium
       - name: the adapter this runner's browser offers
         shell: bash
         run: |
