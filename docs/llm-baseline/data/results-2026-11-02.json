@@ -1,0 +1,610 @@
+[
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1",
+  "round": 1,
+  "load1": 6.87,
+  "pp_tps": 1121.567793,
+  "tg_tps": 452.631561,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1",
+  "round": 1,
+  "load1": 6.87,
+  "pp_tps": 389.395069,
+  "tg_tps": 139.38129,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f16_1",
+  "round": 1,
+  "load1": 6.56,
+  "pp_tps": 543.9864003468815,
+  "tg_tps": 178.5212257692393,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f32_1",
+  "round": 1,
+  "load1": 6.56,
+  "pp_tps": 511.59072741197184,
+  "tg_tps": 152.883110634526,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f16_1",
+  "round": 1,
+  "load1": 6.28,
+  "pp_tps": 2452.1072795534897,
+  "tg_tps": 178.4459744266801,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f32_1",
+  "round": 1,
+  "load1": 6.28,
+  "pp_tps": 467.3238408330712,
+  "tg_tps": 169.13037688980248,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context)",
+  "round": 1,
+  "load1": 5.92,
+  "pp_tps": 18934.7936,
+  "tg_tps": 518.59322,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context)",
+  "round": 1,
+  "load1": 5.68,
+  "pp_tps": 10580.005839,
+  "tg_tps": 465.15459,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1",
+  "round": 2,
+  "load1": 5.68,
+  "pp_tps": 400.999052,
+  "tg_tps": 141.964603,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f16_1",
+  "round": 2,
+  "load1": 5.68,
+  "pp_tps": 2717.6220810233185,
+  "tg_tps": 203.9832958678045,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f32_1",
+  "round": 2,
+  "load1": 5.39,
+  "pp_tps": 2549.8007966613745,
+  "tg_tps": 201.84361097658604,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f16_1",
+  "round": 2,
+  "load1": 5.39,
+  "pp_tps": 2475.8220501474175,
+  "tg_tps": 183.20830933278185,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f32_1",
+  "round": 2,
+  "load1": 5.39,
+  "pp_tps": 2140.468227531423,
+  "tg_tps": 176.36439382835033,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context)",
+  "round": 2,
+  "load1": 5.44,
+  "pp_tps": 18460.317241,
+  "tg_tps": 554.562886,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context)",
+  "round": 2,
+  "load1": 5.44,
+  "pp_tps": 10551.624938,
+  "tg_tps": 460.60162,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1",
+  "round": 2,
+  "load1": 5.44,
+  "pp_tps": 1138.280726,
+  "tg_tps": 463.807677,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f16_1",
+  "round": 3,
+  "load1": 5.44,
+  "pp_tps": 3152.709360068759,
+  "tg_tps": 191.72705316424984,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f32_1",
+  "round": 3,
+  "load1": 5.44,
+  "pp_tps": 2456.8138198588053,
+  "tg_tps": 167.0393265757197,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f16_1",
+  "round": 3,
+  "load1": 5.48,
+  "pp_tps": 2173.1748729954106,
+  "tg_tps": 184.40540148025335,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f32_1",
+  "round": 3,
+  "load1": 5.48,
+  "pp_tps": 2184.3003409636663,
+  "tg_tps": 175.63269255337298,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context)",
+  "round": 3,
+  "load1": 5.52,
+  "pp_tps": 18485.534997,
+  "tg_tps": 558.95237,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context)",
+  "round": 3,
+  "load1": 5.52,
+  "pp_tps": 10125.280571,
+  "tg_tps": 429.708346,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1",
+  "round": 3,
+  "load1": 5.52,
+  "pp_tps": 1102.476481,
+  "tg_tps": 469.968092,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1",
+  "round": 3,
+  "load1": 5.52,
+  "pp_tps": 405.156139,
+  "tg_tps": 140.327085,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f32_1",
+  "round": 4,
+  "load1": 5.52,
+  "pp_tps": 2758.6206893008048,
+  "tg_tps": 227.843559404777,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f16_1",
+  "round": 4,
+  "load1": 5.52,
+  "pp_tps": 2433.4600756319996,
+  "tg_tps": 181.3508496057716,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f32_1",
+  "round": 4,
+  "load1": 5.8,
+  "pp_tps": 2428.8425052932457,
+  "tg_tps": 177.07752369151746,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context)",
+  "round": 4,
+  "load1": 5.8,
+  "pp_tps": 18802.904285,
+  "tg_tps": 512.862292,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context)",
+  "round": 4,
+  "load1": 5.8,
+  "pp_tps": 10307.54825,
+  "tg_tps": 430.566824,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1",
+  "round": 4,
+  "load1": 5.42,
+  "pp_tps": 1145.401909,
+  "tg_tps": 467.805694,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1",
+  "round": 4,
+  "load1": 5.42,
+  "pp_tps": 391.496572,
+  "tg_tps": 141.937801,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f16_1",
+  "round": 4,
+  "load1": 5.42,
+  "pp_tps": 2902.494330477317,
+  "tg_tps": 228.54057948488784,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f16_1",
+  "round": 5,
+  "load1": 5.42,
+  "pp_tps": 2746.781116231161,
+  "tg_tps": 184.99635832735646,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f32_1",
+  "round": 5,
+  "load1": 5.14,
+  "pp_tps": 2298.0251345269544,
+  "tg_tps": 175.77854670192673,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context)",
+  "round": 5,
+  "load1": 5.14,
+  "pp_tps": 17981.632044,
+  "tg_tps": 508.101675,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context)",
+  "round": 5,
+  "load1": 5.14,
+  "pp_tps": 10532.522702,
+  "tg_tps": 453.598981,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1",
+  "round": 5,
+  "load1": 5.14,
+  "pp_tps": 1145.404471,
+  "tg_tps": 466.793535,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1",
+  "round": 5,
+  "load1": 5.14,
+  "pp_tps": 403.264763,
+  "tg_tps": 140.479599,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f16_1",
+  "round": 5,
+  "load1": 4.97,
+  "pp_tps": 2831.8584068929295,
+  "tg_tps": 227.15077801433512,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f32_1",
+  "round": 5,
+  "load1": 4.97,
+  "pp_tps": 2857.142857332923,
+  "tg_tps": 227.5985663203999,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f32_1",
+  "round": 6,
+  "load1": 4.97,
+  "pp_tps": 2452.1072795534897,
+  "tg_tps": 176.95415914439243,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context)",
+  "round": 6,
+  "load1": 4.97,
+  "pp_tps": 18966.590499,
+  "tg_tps": 562.707237,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context)",
+  "round": 6,
+  "load1": 4.97,
+  "pp_tps": 10487.218989,
+  "tg_tps": 435.432775,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1",
+  "round": 6,
+  "load1": 4.97,
+  "pp_tps": 1146.164739,
+  "tg_tps": 465.953611,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1",
+  "round": 6,
+  "load1": 4.97,
+  "pp_tps": 398.910113,
+  "tg_tps": 142.845631,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f16_1",
+  "round": 6,
+  "load1": 4.97,
+  "pp_tps": 2962.9629627585578,
+  "tg_tps": 227.88444282629888,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f32_1",
+  "round": 6,
+  "load1": 4.97,
+  "pp_tps": 2776.572667574306,
+  "tg_tps": 223.59154928990915,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f16_1",
+  "round": 6,
+  "load1": 4.97,
+  "pp_tps": 2539.6825393821887,
+  "tg_tps": 180.86015382843394,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context)",
+  "round": 7,
+  "load1": 4.97,
+  "pp_tps": 18315.694461,
+  "tg_tps": 549.652675,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context)",
+  "round": 7,
+  "load1": 4.97,
+  "pp_tps": 10231.984672,
+  "tg_tps": 437.209549,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1",
+  "round": 7,
+  "load1": 4.82,
+  "pp_tps": 1143.091027,
+  "tg_tps": 468.427142,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1",
+  "round": 7,
+  "load1": 4.82,
+  "pp_tps": 404.537669,
+  "tg_tps": 142.579602,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f16_1",
+  "round": 7,
+  "load1": 4.82,
+  "pp_tps": 2819.38326046712,
+  "tg_tps": 226.7452240695441,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f32_1",
+  "round": 7,
+  "load1": 4.82,
+  "pp_tps": 2560,
+  "tg_tps": 223.43420122922552,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f16_1",
+  "round": 7,
+  "load1": 4.59,
+  "pp_tps": 2650.103519832255,
+  "tg_tps": 185.02331003777036,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f32_1",
+  "round": 7,
+  "load1": 4.59,
+  "pp_tps": 2169.491525423729,
+  "tg_tps": 177.49825294777142,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context)",
+  "round": 8,
+  "load1": 4.59,
+  "pp_tps": 10225.752663,
+  "tg_tps": 430.400752,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1",
+  "round": 8,
+  "load1": 4.46,
+  "pp_tps": 1145.595413,
+  "tg_tps": 467.31929,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1",
+  "round": 8,
+  "load1": 4.46,
+  "pp_tps": 399.839855,
+  "tg_tps": 142.899048,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f16_1",
+  "round": 8,
+  "load1": 4.46,
+  "pp_tps": 2794.7598255093676,
+  "tg_tps": 226.94781985562463,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M WebLLM q4f32_1",
+  "round": 8,
+  "load1": 4.46,
+  "pp_tps": 2655.60165958684,
+  "tg_tps": 224.14401694552802,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f16_1",
+  "round": 8,
+  "load1": 4.35,
+  "pp_tps": 2388.0597017580963,
+  "tg_tps": 184.61985751983656,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "Qwen2.5-0.5B WebLLM q4f32_1",
+  "round": 8,
+  "load1": 4.35,
+  "pp_tps": 2180.579216243635,
+  "tg_tps": 177.20106039663656,
+  "pp_tokens": 128,
+  "tg_tokens": 128,
+  "adapter": "apple metal-3"
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context)",
+  "round": 8,
+  "load1": 4.35,
+  "pp_tps": 19238.599364,
+  "tg_tps": 517.845089,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ }
+]

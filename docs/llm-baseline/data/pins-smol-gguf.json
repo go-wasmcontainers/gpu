@@ -1,0 +1,10 @@
+[
+ {
+  "repo": "bartowski/SmolLM2-135M-Instruct-GGUF",
+  "commit": "09816acd5d99df7be770d85ea30822623dab342c",
+  "path": "SmolLM2-135M-Instruct-Q4_0.gguf",
+  "size": 91893088,
+  "sha256": "bcc3af2849ad6095af57e9b5cd43775256efdc66e306acb529172f92d0c04b03",
+  "verified": "lfs-sha256"
+ }
+]

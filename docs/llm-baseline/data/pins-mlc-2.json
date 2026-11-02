@@ -1,0 +1,106 @@
+[
+ {
+  "repo": "mlc-ai/SmolLM2-135M-Instruct-q4f32_1-MLC",
+  "commit": "142ac13dfa8857ff83132056ef4005a586ac4855",
+  "path": ".gitattributes",
+  "size": 1519,
+  "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/SmolLM2-135M-Instruct-q4f32_1-MLC",
+  "commit": "142ac13dfa8857ff83132056ef4005a586ac4855",
+  "path": "README.md",
+  "size": 1507,
+  "sha256": "c48502649b19f4285b28c98fa0dc23752ec4c72a61aadc277c03341da5cd5341",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/SmolLM2-135M-Instruct-q4f32_1-MLC",
+  "commit": "142ac13dfa8857ff83132056ef4005a586ac4855",
+  "path": "merges.txt",
+  "size": 466391,
+  "sha256": "0b54e8aa4e53d5383e2e4bc635a56b43f9647f7b13832d5d9ecd8f82dac4f510",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/SmolLM2-135M-Instruct-q4f32_1-MLC",
+  "commit": "142ac13dfa8857ff83132056ef4005a586ac4855",
+  "path": "mlc-chat-config.json",
+  "size": 2020,
+  "sha256": "71cec9fb099c8326172b17d345e3f6c865d7958c5237f80dcad7c2e58ba5f830",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/SmolLM2-135M-Instruct-q4f32_1-MLC",
+  "commit": "142ac13dfa8857ff83132056ef4005a586ac4855",
+  "path": "ndarray-cache-b16.json",
+  "size": 114211,
+  "sha256": "6cd114522e9b63c9471ae8058f8983a78e0f527c0cfd4b7b437e5cae955e9190",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/SmolLM2-135M-Instruct-q4f32_1-MLC",
+  "commit": "142ac13dfa8857ff83132056ef4005a586ac4855",
+  "path": "ndarray-cache.json",
+  "size": 115485,
+  "sha256": "392081e9b0865ba01701c70f824891284283db82afa27bfff7372754a3b26d7e",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/SmolLM2-135M-Instruct-q4f32_1-MLC",
+  "commit": "142ac13dfa8857ff83132056ef4005a586ac4855",
+  "path": "params_shard_0.bin",
+  "size": 33364224,
+  "sha256": "f11cefd7afff22988cfd460d315eafd02d0b2e08a5916f084c5bbcc5ebb5311e",
+  "verified": "lfs-sha256"
+ },
+ {
+  "repo": "mlc-ai/SmolLM2-135M-Instruct-q4f32_1-MLC",
+  "commit": "142ac13dfa8857ff83132056ef4005a586ac4855",
+  "path": "params_shard_1.bin",
+  "size": 32883840,
+  "sha256": "38b6288bc774586c182ce8111b37b9d0a4086379a7e24240a579f582d5f764bc",
+  "verified": "lfs-sha256"
+ },
+ {
+  "repo": "mlc-ai/SmolLM2-135M-Instruct-q4f32_1-MLC",
+  "commit": "142ac13dfa8857ff83132056ef4005a586ac4855",
+  "path": "params_shard_2.bin",
+  "size": 9467136,
+  "sha256": "377ce63704efbc66c5ebbb8f00a61aeed58c86f629cc7bfd2dd014becddd552a",
+  "verified": "lfs-sha256"
+ },
+ {
+  "repo": "mlc-ai/SmolLM2-135M-Instruct-q4f32_1-MLC",
+  "commit": "142ac13dfa8857ff83132056ef4005a586ac4855",
+  "path": "tensor-cache.json",
+  "size": 115485,
+  "sha256": "392081e9b0865ba01701c70f824891284283db82afa27bfff7372754a3b26d7e",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/SmolLM2-135M-Instruct-q4f32_1-MLC",
+  "commit": "142ac13dfa8857ff83132056ef4005a586ac4855",
+  "path": "tokenizer.json",
+  "size": 2104556,
+  "sha256": "9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/SmolLM2-135M-Instruct-q4f32_1-MLC",
+  "commit": "142ac13dfa8857ff83132056ef4005a586ac4855",
+  "path": "tokenizer_config.json",
+  "size": 3764,
+  "sha256": "a27f638bd2831f5c3dea654a75838930f2b11fbe550c4d4e1d5d7bd07157b2ee",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/SmolLM2-135M-Instruct-q4f32_1-MLC",
+  "commit": "142ac13dfa8857ff83132056ef4005a586ac4855",
+  "path": "vocab.json",
+  "size": 800662,
+  "sha256": "82b84012e3add4d01d12ba14442026e49b8cbbaead1f79ecf3d919784f82dc79",
+  "verified": "git-blob-sha1"
+ }
+]
