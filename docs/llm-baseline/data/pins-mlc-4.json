@@ -1,0 +1,146 @@
+[
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": ".gitattributes",
+  "size": 1519,
+  "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "README.md",
+  "size": 1489,
+  "sha256": "597e3bbe3d23ce690ad811c826b5efbbead239d6743384ac8e7956db5b5ede86",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "merges.txt",
+  "size": 1671839,
+  "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "mlc-chat-config.json",
+  "size": 2041,
+  "sha256": "6ac10b5805b22c82f1867d9be61530d03755e8741c2b7335f120ffa1c15ae8f1",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "ndarray-cache-b16.json",
+  "size": 101241,
+  "sha256": "9aac5251afa9fbb27596675965076436f724cd7c2d19d5f984855f033070d91c",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "ndarray-cache.json",
+  "size": 102431,
+  "sha256": "bfb7adf1d3c1b8ea6606e6f126a126c575ce39381a4712ca65da992beb177e98",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "params_shard_0.bin",
+  "size": 68067328,
+  "sha256": "cb329fab0c8928aa483b43cf425b8dc19c9b669418c102c0411f45fb0a515b55",
+  "verified": "lfs-sha256"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "params_shard_1.bin",
+  "size": 33234176,
+  "sha256": "08da1b93fd5d427aa7dafb5af8e2ffc68a630698186eb41abb1229f090fdd990",
+  "verified": "lfs-sha256"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "params_shard_2.bin",
+  "size": 33505280,
+  "sha256": "114106e371472c94f39c28834f95a44924eeac8202d9520bbb46d5f7457657c4",
+  "verified": "lfs-sha256"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "params_shard_3.bin",
+  "size": 33053696,
+  "sha256": "2de95c1472f18315d1bf1e26c34a79b2f3645141e221d9a7da825203ea6ee90e",
+  "verified": "lfs-sha256"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "params_shard_4.bin",
+  "size": 33020928,
+  "sha256": "8e6f54644b2cbbb9c041083c1e3a8a3475e3a5b37e5e361140e35cff5f50d9e6",
+  "verified": "lfs-sha256"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "params_shard_5.bin",
+  "size": 29211648,
+  "sha256": "e78186d6ef6ddc381b5d1846ebb7c3ddc62bf5a1bc9544966fca084f5305f8a3",
+  "verified": "lfs-sha256"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "params_shard_6.bin",
+  "size": 33297408,
+  "sha256": "8d625775408fb8ffc99430e4293a7283cd372683965b982649c73daa856cb41d",
+  "verified": "lfs-sha256"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "params_shard_7.bin",
+  "size": 14605824,
+  "sha256": "5d333f26220b8c084c5019b0e25ff2bebf1cccbc7c1f1a59724f9ba6d4afb5a9",
+  "verified": "lfs-sha256"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "tensor-cache.json",
+  "size": 102431,
+  "sha256": "bfb7adf1d3c1b8ea6606e6f126a126c575ce39381a4712ca65da992beb177e98",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "tokenizer.json",
+  "size": 7031645,
+  "sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "tokenizer_config.json",
+  "size": 7308,
+  "sha256": "5214600ee45ca2f887ce2eede8910378a0111ea99d657428bcbce94778e65a92",
+  "verified": "git-blob-sha1"
+ },
+ {
+  "repo": "mlc-ai/Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+  "commit": "8e6ec5f417c7d0e1414703ef619b8a24686e3ab0",
+  "path": "vocab.json",
+  "size": 2776833,
+  "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+  "verified": "git-blob-sha1"
+ }
+]

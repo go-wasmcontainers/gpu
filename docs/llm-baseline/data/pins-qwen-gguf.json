@@ -1,0 +1,10 @@
+[
+ {
+  "repo": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+  "commit": "9217f5db79a29953eb74d5343926648285ec7e67",
+  "path": "qwen2.5-0.5b-instruct-q4_0.gguf",
+  "size": 428730208,
+  "sha256": "7671c0c304e6ce5a7fc577bcb12aba01e2c155cc2efd29b2213c95b18edaf6ed",
+  "verified": "lfs-sha256"
+ }
+]
