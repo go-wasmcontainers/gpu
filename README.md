@@ -9,7 +9,8 @@ rendering, on WebGPU in the browser (the playground) and on the CPU
 natively. Pure Go, `CGO_ENABLED=0`.
 
 Design and references: [docs/DESIGN.md](docs/DESIGN.md). Small language
-models on the GPU (proposal, not implemented): [docs/llm-design.md](docs/llm-design.md).
+models on the GPU, run inside the container over a replayed WebGPU command
+stream (proposal, not implemented): [docs/llm-design.md](docs/llm-design.md).
 
 ## Status
 
