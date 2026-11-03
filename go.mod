@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/go-gfx/webgpu v0.8.0
 	github.com/go-virtio/gpu v0.10.0
-	github.com/go-wasmcontainers/engine v0.32.0
+	github.com/go-wasmcontainers/engine v0.33.0
 	github.com/mxschmitt/playwright-go v0.6201.1
 	github.com/spf13/cobra v1.10.2
 	github.com/tetratelabs/wazero v1.12.0
