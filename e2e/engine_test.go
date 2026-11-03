@@ -24,6 +24,8 @@ type engineCase struct {
 	Module string   `json:"module"`
 	Args   []string `json:"args"`
 	GPU    bool     `json:"gpu"`
+	// GPUMemory is run --gpu-memory in bytes.
+	GPUMemory int64 `json:"gpuMemory,omitempty"`
 }
 
 type engineReport struct {

@@ -70,6 +70,9 @@ jobs:
           - { target: FuzzLoad, pkg: ./wit }
           - { target: FuzzWebGPUCalls, pkg: ./webgpu }
           - { target: FuzzStreamCalls, pkg: ./webgpu }
+          # wasi_webgpu_batch calls: arbitrary call sequences, frames and
+          # guest memory; guest memory is written only inside the read window.
+          - { target: FuzzBatchCalls, pkg: ./gpubatch }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
