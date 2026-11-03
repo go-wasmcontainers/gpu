@@ -8,10 +8,6 @@
 // host answered.
 //
 //	hang [TARGET_MS]
-//
-// The target stays a few seconds: the host destroys the device at 2 s, but
-// the GPU finishes the work it already holds, and the containers started
-// after this one wait for it.
 package main
 
 import (
@@ -72,7 +68,12 @@ func (r *rig) submit(iters uint64) (time.Duration, error) {
 }
 
 func main() {
-	target := 5000.0
+	// 3 s: over the 2 s deadline, and the GPU has only about 1 s of the work
+	// left to drain when the device is destroyed. destroy() does not cancel
+	// work the GPU already holds, and a container started in that window
+	// queues behind it (with 5 s, Firefox's next container hit its own 2 s
+	// deadline; filed as an issue).
+	target := 3000.0
 	if len(os.Args) > 1 {
 		if n, err := strconv.ParseFloat(os.Args[1], 64); err == nil && n > 0 {
 			target = n
@@ -104,12 +105,21 @@ func main() {
 	// 16 in Y, then the loop) until one submit takes 250 ms, well under the
 	// 2 s deadline even on a software adapter, then scale the loop to the
 	// target.
+	// A submit also has a fixed latency (about 200 ms in Firefox, which
+	// quantises read-back): measure it on an empty-ish shader and subtract
+	// it, or the calibration would stop at the latency, not at GPU work.
+	lat := time.Hour
+	for i := 0; i < 3; i++ {
+		l, err := r.submit(1)
+		must(err)
+		lat = min(lat, l)
+	}
 	iters := uint64(1 << 10)
 	var took time.Duration
 	for {
 		took, err = r.submit(iters)
 		must(err)
-		if took >= 250*time.Millisecond || iters >= 1<<31 {
+		if took-lat >= 250*time.Millisecond || iters >= 1<<31 {
 			break
 		}
 		switch {
@@ -121,15 +131,16 @@ func main() {
 			iters *= 2
 		}
 	}
-	iters = uint64(float64(iters) * target / float64(took.Milliseconds()+1))
+	work := max(float64((took - lat).Milliseconds()), 1)
+	iters = uint64(float64(iters) * max(target-float64(lat.Milliseconds()), 1) / work)
 	if iters == 0 {
 		iters = 1
 	}
 	if iters > 1<<32-1 {
 		iters = 1<<32 - 1
 	}
-	fmt.Printf("dispatch %d x %d workgroups of 64; calibration took %d ms; %d iterations aim at %.0f ms\n",
-		r.gx, r.gy, took.Milliseconds(), iters, target)
+	fmt.Printf("dispatch %d x %d workgroups of 64; calibration took %d ms (latency %d ms); %d iterations aim at %.0f ms\n",
+		r.gx, r.gy, took.Milliseconds(), lat.Milliseconds(), iters, target)
 
 	took, err = r.submit(iters)
 	ms := took.Milliseconds()

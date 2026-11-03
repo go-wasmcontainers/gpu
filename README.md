@@ -234,7 +234,11 @@ and architecture, so the lane relies on `isFallbackAdapter`; it fails, never
 skips, when `requestAdapter` returns null. Firefox 159 offers `shader-f16`;
 the f32 path stays mandatory (older Firefox, other platforms). Known:
 a submit costs about 200 ms in Firefox 159 (quantised read-back), against
-well under 1 ms in Chromium (see the open issue).
+well under 1 ms in Chromium (go-wasmcontainers/gpu#25). The 2 s deadline
+destroys the device but does not cancel work the GPU already holds: a
+container started in the next seconds queues behind it (with a 5 s shader,
+Firefox's next container hit its own 2 s deadline; go-wasmcontainers/gpu#26),
+so `TestBatchDeadline` uses a 3 s shader.
 
 ## `onnx`
 
