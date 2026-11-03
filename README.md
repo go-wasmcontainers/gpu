@@ -240,6 +240,26 @@ on SwiftShader (labelled fallback: proves the WGSL, not a GPU).
 | Firefox | Windows | since 141 | not run here |
 | Firefox | macOS, Apple silicon | 145 (Tahoe), 147 (older macOS); not Intel | see the row above |
 | Firefox | Linux | not supported (MDN browser-compat-data `api.GPU`, bug 2006676) | none |
+| Safari 27.2 | macOS 27, Apple M4 Max | yes (since 26), adapter reported as vendor `apple`, architecture `apple`, not a fallback; `shader-f16` yes, `subgroups` no here | passes locally through safaridriver (batch module, refusals, quota, 123/123 ONNX cases, MNIST-12 within 3.1e-5, 2 s deadline at 2002 ms) |
+| Safari 27.2 / 26.6.2 | GitHub macOS runners (`macos-15`, `macos-26`; virtual machines) | no: `macos-15` has no `navigator.gpu`, `macos-26` answers `requestAdapter` with null | no CI lane (the lane fails there; WebKit excludes VMs) |
+
+Per-submit round trip seen from the guest, 30 interleaved rounds each, Apple
+M4 Max, 1-minute load 4 to 5, medians (read 4 KiB / read 1 MiB /
+compute+copy+read 4 KiB / 1 MiB): Chromium 151 360 / 1020 / 825 / 1235 us;
+Safari 27.2 340 / 1200 / 820 / 1340 us; Firefox 159 about 200 000 us for all
+four (go-wasmcontainers/gpu#25). Timers are quantised (20 us in Chromium and
+Safari), so differences under 100 us are noise.
+
+Safari: `GPU_E2E_BROWSER=safari go test -tags e2e ./e2e/` drives the real
+Safari through `safaridriver` (W3C WebDriver, `internal/webdriver`;
+Playwright's WebKit is not Safari) after a one-time `sudo safaridriver
+--enable`; without it the lane fails with that instruction. Sources opened:
+MDN browser-compat-data `api/GPU.json` (Safari 26), the WebKit blog on Safari
+26.0, safaridriver(1) of Safari 27.2, and WebKit
+`Source/WebGPU/WebGPU/HardwareCapabilities.mm` (shader-f16 reported always,
+subgroups on Metal 3, no WebGPU on virtual machines unless
+`WebKitAllowWebGPUOnVMs`; setting that default on `macos-26` did not give a
+working lane: the job failed after 15 minutes).
 
 Sources opened: MDN browser-compat-data `api/GPU.json` (Firefox
 `version_added` 141, partial; the per-platform notes above) and the Firefox
