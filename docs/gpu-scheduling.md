@@ -145,13 +145,18 @@ victim's **worst submit**:
 
 | run | Chromium 151 | Firefox 159 |
 |---|---|---|
-| control (no sanction: the victim waits the shader out) | 7,462 ms (load 6 to 8) | 3,189 ms |
-| combined (creation and dispatch in one frame; sanction at the 2 s cap) | 3,052 ms (load 4 to 5, first build); 4,175 ms (load 6 to 8) | 3,475 ms |
-| split (dispatch in a frame of its own; sanction at the budget) | 2,949 ms (load 4 to 5, budget then 250 ms); 5,066 ms (load 6 to 8) | 9,301 ms: the shader's calibration overshot on Firefox at load 8, **not a valid measurement** |
+| control (no sanction: the victim waits the shader out) | 7,462 ms (load 6 to 8) | 3,189 and 7,109 ms |
+| combined (creation and dispatch in one frame; sanction at the 2 s cap) | 3,052 ms (load 4 to 5, first build); 4,175 ms (load 6 to 8) | 3,475 and 3,161 ms |
+| split (dispatch in a frame of its own; sanction at the budget) | 2,949 ms (load 4 to 5, budget then 250 ms); 5,066 ms (load 6 to 8) | 9,301 and 8,906 ms: not comparable, the shader itself ran about 9 s (see below) |
 
 What the numbers say: the victim's latency is the hostile shader's remaining
 length, and the shader's length changes with whatever else uses the GPU (the
 same "3 s" shader ran 3.0 s or 7.5 s in Chromium, on this shared machine).
+On Firefox a submit resolves in 200 ms steps, so the hostile's calibration
+(which stops at 40 ms of work to stay far under the budget) cannot see work
+below 200 ms and overshoots: its "3 s" split shader ran about 9 s. The e2e
+therefore logs the victim's worst latency and only asserts that it is below
+the run's length.
 Sanctioning does not shorten it, and does not lengthen it; what it changes is
 that the victim is **never sanctioned itself** (0 errors in every run, one
 sanction in the whole module), that the hostile container gets no GPU after
