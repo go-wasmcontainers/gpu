@@ -292,7 +292,7 @@ func TestBatchComputeQuota(t *testing.T) {
 	}
 }
 
-var victimStats =regexp.MustCompile(`victim: (\d+) submits, median ([0-9.]+) ms, max ([0-9.]+) ms, errors (\d+)`)
+var victimStats = regexp.MustCompile(`victim: (\d+) submits, median ([0-9.]+) ms, max ([0-9.]+) ms, errors (\d+)`)
 
 // TestBatchSanction (go-wasmcontainers/gpu#26): a hostile container runs a
 // shader calibrated to about 3 s while a victim container makes short submits
@@ -309,7 +309,15 @@ func TestBatchSanction(t *testing.T) {
 	if load := loadAverage(); load > 8 {
 		t.Skipf("1-minute load average %.1f above 8: not measuring", load)
 	}
-	for _, mode := range []string{"combined", "split"} {
+	// "control" runs the same pair with the budget and the cap raised to 60 s:
+	// nobody is sanctioned, the hostile shader runs to its end and the victim
+	// waits for all of it. That is what the victim pays with no sanction at
+	// all, on this machine at this moment, and what the sanctioned runs must
+	// not exceed by more than a margin: sanctioning cannot shorten the
+	// shader (no browser cancels submitted work), it must not lengthen the
+	// wait either.
+	var controlWorst float64
+	for _, mode := range []string{"control", "combined", "split"} {
 		t.Run(mode, func(t *testing.T) {
 			args := []string{"3000"}
 			if mode == "split" {
@@ -319,7 +327,14 @@ func TestBatchSanction(t *testing.T) {
 				{Name: "victim", Module: "victim.wasm", Args: []string{"25000", "20"}, GPU: true, Parallel: true},
 				{Name: "hostile", Module: "hang.wasm", Args: args, GPU: true, DelayMs: 1000},
 			}
-			rep := runBatchCasesSanctions(t, cases, launchFallbackArgs(), pageQuery(0, 0), 1)
+			query, want := pageQuery(0, 0), int64(1)
+			if mode == "control" {
+				query, want = "?budget=60000&gputime=60000", 0
+				if allowFallback() != "" {
+					query += "&fallback=1"
+				}
+			}
+			rep := runBatchCasesSanctions(t, cases, launchFallbackArgs(), query, want)
 			requireGPU(t, rep)
 			byName := map[string]int{}
 			for i, r := range rep.Results {
@@ -327,11 +342,13 @@ func TestBatchSanction(t *testing.T) {
 				t.Logf("%s (%.0f ms): exit %d\n%s%s events %q", r.Name, r.Ms, r.Exit, r.Stdout, r.Stderr, r.Events)
 			}
 			h, v := rep.Results[byName["hostile"]], rep.Results[byName["victim"]]
-			if h.Exit != 0 || !strings.Contains(h.Stdout, "(timeout as expected: true)") || !strings.Contains(h.Stdout, "(revoked as expected: true)") {
-				t.Errorf("hostile: exit %d (%s), stdout %q", h.Exit, h.Error, h.Stdout)
-			}
-			if len(h.Events) != 1 || !strings.HasPrefix(h.Events[0], "gpu/sanction ") || len(v.Events) != 0 {
-				t.Errorf("engine events: hostile %q, victim %q", h.Events, v.Events)
+			if mode != "control" {
+				if h.Exit != 0 || !strings.Contains(h.Stdout, "(timeout as expected: true)") || !strings.Contains(h.Stdout, "(revoked as expected: true)") {
+					t.Errorf("hostile: exit %d (%s), stdout %q", h.Exit, h.Error, h.Stdout)
+				}
+				if len(h.Events) != 1 || !strings.HasPrefix(h.Events[0], "gpu/sanction ") || len(v.Events) != 0 {
+					t.Errorf("engine events: hostile %q, victim %q", h.Events, v.Events)
+				}
 			}
 			m := victimStats.FindStringSubmatch(v.Stdout)
 			if v.Exit != 0 || m == nil || m[4] != "0" {
@@ -340,11 +357,22 @@ func TestBatchSanction(t *testing.T) {
 			median, _ := strconv.ParseFloat(m[2], 64)
 			worst, _ := strconv.ParseFloat(m[3], 64)
 			t.Logf("MEASURED %s: the victim's median submit %.1f ms, worst case %.1f ms (the hostile's shader aims at 3000 ms)", mode, median, worst)
+			if load := loadAverage(); load > 8 {
+				t.Skipf("1-minute load average %.1f above 8 after the run: the latency above is not a measurement", load)
+			}
+			if mode == "control" {
+				controlWorst = worst
+				return
+			}
 			// The worst case is the work the GPU still held after the
-			// destroy, plus a turn: it cannot exceed the shader's own length
-			// by more than the hard cap and some margin.
-			if worst > 3000+2000+1500 {
-				t.Errorf("the victim's worst submit took %.1f ms", worst)
+			// destroy, plus a turn: no more than the unsanctioned wait, with
+			// a margin for a second calibration and the machine's noise.
+			limit := 3000 + 2000 + 1500.0
+			if controlWorst > 0 {
+				limit = controlWorst*1.25 + 1000
+			}
+			if worst > limit {
+				t.Errorf("the victim's worst submit took %.1f ms, above %.0f ms (control: %.1f ms)", worst, limit, controlWorst)
 			}
 		})
 	}

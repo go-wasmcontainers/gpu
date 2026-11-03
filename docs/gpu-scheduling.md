@@ -93,15 +93,17 @@ Budget, chosen from measurements (Apple M4 Max, `GPU_E2E` lanes):
 
 | workload | Chromium 151 | Firefox 159 |
 |---|---|---|
-| batchcompute (read-back, refusals, quota, grant), longest submit | 8.4 ms (13.1 ms stream-only, victim run) | 198.6 ms |
-| 120-submit round-trip bench, longest submit | 7.7 ms | 202.0 ms |
-| LLM (go-wasmcontainers/llm v0.1.0, `examples/generate`, SmolLM2-135M Q4_0, 183 submits), longest submit | 30.7 to 39.8 ms | not measured (the LLM e2e is a Chromium lane); a submit costs at least the 200 ms floor of #25 |
+| batchcompute (read-back, refusals, quota, grant, shaders), longest submit | 8.4 to 14.8 ms | 198.3 to 198.6 ms |
+| 120-submit round-trip bench (steady stream frames), longest submit | 7.7 to 9.9 ms | 202.0 ms; **226.4 ms** in a run at load 8 |
+| victim container (a 4 KiB compute and read-back every 20 ms for 25 s), longest stream-only submit | 13 to 66 ms | 200.3 to 205.3 ms |
+| LLM (go-wasmcontainers/llm v0.1.0, `examples/generate`, SmolLM2-135M Q4_0, 183 submits), longest submit | 30.7 to 43.4 ms | not measured (the LLM e2e is a Chromium lane); a submit costs at least the 200 ms floor of #25 |
 
-The longest legitimate submit measured is **202 ms (Firefox, the floor of
-#25)**. 250 ms would leave 48 ms (24 %), too little for a loaded machine, so
-the default is **500 ms**: 2.5 times the Firefox figure and 12 times the
-Chromium LLM figure. The hard cap stays 2 s, 4 times the budget and 10 times
-the slowest legitimate submit.
+The longest legitimate submit measured is **226 ms (Firefox 159: the 200 ms
+floor of #25, plus load)**. 250 ms would leave 24 ms (10 %): a false positive
+waiting for a busy machine. The default is therefore **500 ms**: 2.2 times the
+Firefox maximum and 11 times the Chromium LLM maximum. The hard cap stays 2 s,
+4 times the budget and 9 times the slowest legitimate submit. Both are
+configurable (`Limits.Budget`, `Limits.GPUTime`).
 
 ### 3. Static admission bounds
 
@@ -133,8 +135,29 @@ dispatch (layer 3 does that).
 
 ## Acceptance measurements
 
-See the table in the pull request that introduced this note and the README's
-browser table; the e2e tests are `TestBatchSanction` (hostile shader aimed at
-3 s against a victim container submitting every 20 ms for 25 s, in the
-`combined` and `split` shapes), `TestBatchDeadline`, `TestBatchComputeQuota`
-and the zero-sanction assertion of every other batch and LLM test.
+The e2e tests are `TestBatchSanction` (a hostile container whose shader is
+aimed at 3 s, against a victim container submitting every 20 ms for 25 s, in
+three runs: `control` with the budget and cap raised to 60 s so nobody is
+sanctioned, then `combined` and `split`), `TestBatchDeadline`,
+`TestBatchComputeQuota`, and the zero-sanction assertion of every other batch
+and LLM test. Apple M4 Max, Chromium 151 and Firefox 159 (headed). The
+victim's **worst submit**:
+
+| run | Chromium 151 | Firefox 159 |
+|---|---|---|
+| control (no sanction: the victim waits the shader out) | 7,462 ms (load 6 to 8) | 3,189 ms |
+| combined (creation and dispatch in one frame; sanction at the 2 s cap) | 3,052 ms (load 4 to 5, first build); 4,175 ms (load 6 to 8) | 3,475 ms |
+| split (dispatch in a frame of its own; sanction at the budget) | 2,949 ms (load 4 to 5, budget then 250 ms); 5,066 ms (load 6 to 8) | 9,301 ms: the shader's calibration overshot on Firefox at load 8, **not a valid measurement** |
+
+What the numbers say: the victim's latency is the hostile shader's remaining
+length, and the shader's length changes with whatever else uses the GPU (the
+same "3 s" shader ran 3.0 s or 7.5 s in Chromium, on this shared machine).
+Sanctioning does not shorten it, and does not lengthen it; what it changes is
+that the victim is **never sanctioned itself** (0 errors in every run, one
+sanction in the whole module), that the hostile container gets no GPU after
+its first overrun (the next `context_create` answers *revoked*, asserted),
+and that the stall happens once. Every other batch test, the LLM tests
+(`TestLLMOracle`, `TestLLMTrace`, `TestLLMShaders`) and the existing e2e pass
+with **zero sanctions** on Chromium; the batch tests pass with zero sanctions
+on Firefox. Not measured: Safari (its e2e lane, go-wasmcontainers/gpu#29, has
+not landed).

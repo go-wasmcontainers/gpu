@@ -89,7 +89,7 @@ type Limits struct {
 	// what a frame that creates objects (shader and pipeline compilation
 	// included) may take. Budget is the steady-state budget of a frame that
 	// only streams commands (default 500 ms: the longest legitimate submit
-	// measured is 202 ms in Firefox, 13 ms in Chromium; docs/gpu-scheduling.md), at most GPUTime. Both run from
+	// measured is 226 ms in Firefox (its 200 ms floor), 43 ms in Chromium; docs/gpu-scheduling.md), at most GPUTime. Both run from
 	// the moment the submit gets its turn, not from when it was queued.
 	GPUTime, Budget time.Duration
 	// DrainTime bounds how long the host waits, after a sanction, for the
