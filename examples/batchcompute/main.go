@@ -16,6 +16,9 @@
 //	           outside the window, a malformed frame, an oversized frame,
 //	           an allocation past the GPU memory quota); prints one line
 //	           each; exit 0 when every one is refused as expected
+//	shaders    WGSL the GPU refuses (a reserved word, a syntax error) must fail with
+//	           errno InvalidShader and the compiler's message; a valid source is the
+//	           control; exit 0 when every case is as expected
 //	quota      allocates 64 MiB buffers through the remote device until
 //	           the guest-side quota refuses
 //	bench N    N interleaved rounds of the per-submit round trip at 4 KiB
@@ -31,6 +34,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-gfx/webgpu"
@@ -78,6 +82,8 @@ func main() {
 		refusals(s)
 	case "quota":
 		quota(s)
+	case "shaders":
+		shaders()
 	case "bench":
 		rounds := 30
 		if len(os.Args) > 2 {
@@ -302,4 +308,38 @@ func bench(s *batchsink.Sink, rounds int) {
 		fmt.Printf("bench %s: median %.1f us, min %.1f, max %.1f (%d rounds)\n", c.name, median(slices.Clone(times[j])), slices.Min(times[j]), slices.Max(times[j]), rounds)
 	}
 	fmt.Printf("bench crossings: %d for %d submits\n", s.Submits()-before, rounds*len(cfgs))
+}
+
+// shaders sends invalid WGSL and checks that the failure is loud: the submit
+// that carries the module fails with InvalidShader and the error holds the
+// compiler's message; the valid control passes.
+func shaders() {
+	cases := []struct {
+		name, code, want string
+		ok               bool
+	}{
+		{"valid control", shader, "", true},
+		{"reserved word", "@group(0) @binding(0) var<storage, read> meta: array<u32>;\n@compute @workgroup_size(1) fn main() { _ = meta[0]; }", "meta", false},
+		{"syntax error", "@compute @workgroup_size(1) fn main( { }", ")", false},
+	}
+	bad := 0
+	for _, c := range cases {
+		s, err := batchsink.Open()
+		must(err)
+		d := s.Device("shaders")
+		_, err = d.CreateShaderModule(webgpu.ShaderModuleDescriptor{Code: c.code})
+		must(err) // creation travels with the next submit
+		err = s.Flush()
+		var be *batchsink.Error
+		loud := errors.As(err, &be) && be.Errno == batchsink.InvalidShader && be.Msg != "" && (c.ok || strings.Contains(be.Msg, c.want))
+		fmt.Printf("%s: %v (as expected: %v)\n", c.name, err, loud == !c.ok && (err == nil) == c.ok)
+		if loud == c.ok || (err == nil) != c.ok {
+			bad++
+		}
+		s.Close()
+	}
+	if bad > 0 {
+		os.Exit(1)
+	}
+	fmt.Println("3 shader cases as expected")
 }

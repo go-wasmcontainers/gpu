@@ -18,6 +18,10 @@
 //	context_create(out)                         a context; its handle is stored at out
 //	submit(ctx, frame, frame_len, read, read_len)  run a frame, then fill [read, read+read_len)
 //	context_destroy(ctx)                        release everything the context holds
+//	last_error(ctx, buf, len, out)              the message of the context's last failure
+//	                                            (at most 1 KiB, UTF-8): copied to buf, its
+//	                                            full length stored at out; Success with
+//	                                            length 0 when there is none
 //
 // A process without the "gpu" capability (run --gpu) gets Denied from
 // every function. The container's GPU memory quota is the capability
@@ -31,6 +35,7 @@ import (
 	"errors"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,7 +66,15 @@ const (
 	Timeout         Errno = 8  // a submit still running after GPUTime: the device is destroyed
 	Fault           Errno = 9  // a guest address range outside its memory
 	Failed          Errno = 10 // the backend failed
+	// InvalidShader: the GPU refused an object the guest described: WGSL that
+	// does not compile, or a layout, pipeline or bind group WebGPU rejects.
+	// The context is lost; last_error returns the compiler's message (WGSL
+	// line and column included).
+	InvalidShader Errno = 11
 )
+
+// MaxErrorMessage bounds the text last_error returns.
+const MaxErrorMessage = 1024
 
 // Limits bound one container's use of the module.
 type Limits struct {
@@ -127,6 +140,7 @@ const (
 	fnContextCreate
 	fnSubmit
 	fnContextDestroy
+	fnLastError
 )
 
 // Funcs implements wasi.HostModule: every argument an i32, Errno returned.
@@ -137,6 +151,7 @@ var funcs = []wasi.HostFunc{
 	{Name: "context_create", Params: "i", Result: "i"},
 	{Name: "submit", Params: "iiiii", Result: "i"},
 	{Name: "context_destroy", Params: "i", Result: "i"},
+	{Name: "last_error", Params: "iiii", Result: "i"},
 }
 
 func (m *Module) limits() Limits {
@@ -190,6 +205,8 @@ type gctx struct {
 	// closed: release was called; no frame runs on a closed context.
 	closed atomic.Bool
 	mu     sync.Mutex // held while a frame runs: a batch.Context is not concurrent
+	errMu  sync.Mutex
+	errMsg string // the last failure's message
 }
 
 // release closes the context's backend. If a frame is still running (the
@@ -238,7 +255,7 @@ func later(f func() Errno, then func(e Errno, m wasi.Memory) wasi.Result) wasi.R
 
 // Call implements wasi.Instance.
 func (in *instance) Call(fn int, a []uint64, m wasi.Memory) wasi.Result {
-	if fn < 0 || fn > fnContextDestroy || len(a) != len(funcs[fn].Params) {
+	if fn < 0 || fn > fnLastError || len(a) != len(funcs[fn].Params) {
 		return wasi.Result{Trap: ModuleName + ": no such function"}
 	}
 	u := func(i int) uint32 { return uint32(a[i]) }
@@ -260,6 +277,8 @@ func (in *instance) Call(fn int, a []uint64, m wasi.Memory) wasi.Result {
 		return in.contextCreate(u(0), m)
 	case fnSubmit:
 		return in.submit(u(0), u(1), u(2), u(3), u(4), m)
+	case fnLastError:
+		return in.lastError(u(0), u(1), u(2), u(3), m)
 	default:
 		return r(in.contextDestroy(u(0)))
 	}
@@ -506,16 +525,55 @@ func (in *instance) runFrame(c *gctx, frame, window []byte) (e Errno) {
 			err = errors.New("message type not served here")
 		}
 		if err != nil {
+			c.setError(err)
 			return errno(err)
 		}
 	}
 	return Success
 }
 
+// setError records the message of a failure for last_error.
+func (c *gctx) setError(err error) {
+	m := err.Error()
+	if len(m) > MaxErrorMessage {
+		m = strings.ToValidUTF8(m[:MaxErrorMessage], "")
+	}
+	c.errMu.Lock()
+	c.errMsg = m
+	c.errMu.Unlock()
+}
+
+// lastError copies a context's last failure message to the guest.
+func (in *instance) lastError(h, buf, n, out uint32, m wasi.Memory) wasi.Result {
+	in.mu.Lock()
+	c := in.ctxs[h]
+	in.mu.Unlock()
+	if c == nil {
+		return r(InvalidArgument)
+	}
+	if _, ok := m.Read(out, 4); !ok {
+		return r(Fault)
+	}
+	c.errMu.Lock()
+	msg := c.errMsg
+	c.errMu.Unlock()
+	var l [4]byte
+	binary.LittleEndian.PutUint32(l[:], uint32(len(msg)))
+	if !m.Write(out, l[:]) {
+		return r(Fault)
+	}
+	if k := min(uint32(len(msg)), n); k > 0 && !m.Write(buf, []byte(msg[:k])) {
+		return r(Fault)
+	}
+	return r(Success)
+}
+
 // errno classifies a batch error.
 func errno(err error) Errno {
 	var q *webgpu.QuotaError
 	switch {
+	case errors.Is(err, batch.ErrInvalid):
+		return InvalidShader
 	case errors.As(err, &q):
 		return QuotaExceeded
 	case errors.Is(err, batch.ErrLost):

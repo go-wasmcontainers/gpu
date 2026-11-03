@@ -3,6 +3,8 @@ package gpubatch
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -68,6 +70,17 @@ func (b *fakeBackend) Create(kind uint32, desc []byte) (uint32, error) {
 	b.d.mu.Lock()
 	defer b.d.mu.Unlock()
 	var size int64
+	if wire.Kind(kind) == wire.KindShaderModule {
+		d, err := webgpu.DecodeDescriptor(wire.KindShaderModule, desc, nil)
+		if err != nil {
+			return 0, err
+		}
+		// The real backend asks the GPU; the fake refuses the sources a
+		// browser refuses: a reserved word, a syntax error.
+		if code := d.(webgpu.ShaderModuleDescriptor).Code; strings.Contains(code, "meta") || strings.Contains(code, "fn main(") {
+			return 0, fmt.Errorf("%w: Error while parsing WGSL: :1:42 error: bad source", batch.ErrInvalid)
+		}
+	}
 	if wire.Kind(kind) == wire.KindBuffer {
 		d, err := webgpu.DecodeDescriptor(wire.KindBuffer, desc, nil)
 		if err != nil {
@@ -539,6 +552,7 @@ func TestErrno(t *testing.T) {
 		{errors.New("replay: unknown object 3"), Refused},
 		{&webgpu.JSError{Op: "x"}, Failed},
 		{&webgpu.GPUError{Kind: "validation"}, Failed},
+		{fmt.Errorf("%w: x", batch.ErrInvalid), InvalidShader},
 		{webgpu.ErrDestroyed, Failed},
 	} {
 		if got := errno(tc.err); got != tc.want {
@@ -557,12 +571,85 @@ func TestLimitsDefaultsAndHostModules(t *testing.T) {
 		t.Errorf("MaxRead %d above the wire's window", l.MaxRead)
 	}
 	hm := HostModules(nil)
-	if len(hm) != 1 || hm[0].Module() != "wasi_webgpu_batch" || len(hm[0].Funcs()) != 4 {
+	if len(hm) != 1 || hm[0].Module() != "wasi_webgpu_batch" || len(hm[0].Funcs()) != 5 {
 		t.Errorf("%v", hm)
 	}
 	for i, f := range hm[0].Funcs() {
 		if f.Result != "i" || len(f.Params) != len(funcs[i].Params) {
 			t.Errorf("func %d: %+v", i, f)
 		}
+	}
+}
+
+func shaderFrame(t *testing.T, id uint32, code string) []byte {
+	t.Helper()
+	k, d, err := webgpu.EncodeDescriptor(webgpu.ShaderModuleDescriptor{Code: code})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := wgpubatch.NewEncoder(1 << 20)
+	e.Create(id, uint32(k), d)
+	f, err := e.Frame()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append([]byte(nil), f...)
+}
+
+// lastError reads last_error into guest memory at 100 and returns the message
+// and the length the host reported.
+func (g *guest) lastError(ctx uint32, capacity uint32) (string, uint32) {
+	g.t.Helper()
+	if e := g.call(fnLastError, uint64(ctx), 100, uint64(capacity), 32); e != Success {
+		g.t.Fatalf("last_error: errno %d", e)
+	}
+	n := binary.LittleEndian.Uint32(g.m[32:])
+	return string(g.m[100 : 100+min(n, capacity)]), n
+}
+
+// An invalid shader fails loudly: its own errno, the message through
+// last_error, the context lost; a valid one is the control.
+func TestInvalidShaderIsLoud(t *testing.T) {
+	for _, tc := range []struct {
+		name, code string
+		want       Errno
+	}{
+		{"valid control", "@compute @workgroup_size(1) fn k() {}", Success},
+		{"reserved word", "var<storage, read> meta: array<u32>;", InvalidShader},
+		{"syntax error", "@compute @workgroup_size(1) fn main( { }", InvalidShader},
+	} {
+		g := newGuest(t, gpuCaps, nil)
+		ctx := g.newContext()
+		if m, n := g.lastError(ctx, 64); m != "" || n != 0 {
+			t.Errorf("%s: a fresh context has the error %q", tc.name, m)
+		}
+		if e := g.submit(ctx, shaderFrame(t, 1, tc.code), 4096, 0, 0); e != tc.want {
+			t.Errorf("%s: errno %d, want %d", tc.name, e, tc.want)
+		}
+		msg, n := g.lastError(ctx, 1024)
+		if tc.want == Success {
+			if msg != "" {
+				t.Errorf("%s: unexpected message %q", tc.name, msg)
+			}
+			continue
+		}
+		if !strings.Contains(msg, "Error while parsing WGSL") || int(n) != len(msg) {
+			t.Errorf("%s: message %q (length %d)", tc.name, msg, n)
+		}
+		// A short buffer gets a prefix and the full length.
+		if short, full := g.lastError(ctx, 5); short != msg[:5] || full != n {
+			t.Errorf("%s: short read %q of %d", tc.name, short, full)
+		}
+		if e := g.submit(ctx, shaderFrame(t, 2, "@compute @workgroup_size(1) fn k() {}"), 4096, 0, 0); e != ContextLost {
+			t.Errorf("%s: after the failure, errno %d, want ContextLost", tc.name, e)
+		}
+	}
+	g := newGuest(t, gpuCaps, nil)
+	if e := g.call(fnLastError, 99, 100, 8, 32); e != InvalidArgument {
+		t.Errorf("last_error of no context: %d", e)
+	}
+	ctx := g.newContext()
+	if e := g.call(fnLastError, uint64(ctx), 100, 8, uint64(len(g.m)-1)); e != Fault {
+		t.Errorf("last_error with the length outside memory: %d", e)
 	}
 }

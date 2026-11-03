@@ -55,22 +55,29 @@ const (
 	Timeout         Errno = 8 // 2 s of GPU time exceeded; the device is destroyed
 	Fault           Errno = 9
 	Failed          Errno = 10
+	InvalidShader   Errno = 11 // WGSL that does not compile, or an object WebGPU rejects; the context is lost, Error.Msg says why
 )
 
 var errnoNames = [...]string{"success", "invalid argument", "denied (the container has no GPU: run --gpu)",
 	"unsupported (no GPU here, or only a fallback adapter)", "too large", "quota exceeded", "refused",
-	"context lost", "timeout (2 s of GPU time)", "fault", "failed"}
+	"context lost", "timeout (2 s of GPU time)", "fault", "failed", "invalid shader or object (the GPU refused it)"}
 
 // Error is a host error.
 type Error struct {
 	Op    string
 	Errno Errno
+	// Msg is the host's message for the failure (last_error): for
+	// InvalidShader, the WGSL compiler's text with line and column.
+	Msg string
 }
 
 func (e *Error) Error() string {
 	n := fmt.Sprintf("errno %d", e.Errno)
 	if int(e.Errno) < len(errnoNames) {
 		n = errnoNames[e.Errno]
+	}
+	if e.Msg != "" {
+		return fmt.Sprintf("wasi_webgpu_batch: %s: %s: %s", e.Op, n, e.Msg)
 	}
 	return fmt.Sprintf("wasi_webgpu_batch: %s: %s", e.Op, n)
 }
@@ -91,6 +98,23 @@ type Host interface {
 	ContextDestroy(ctx uint32) Errno
 }
 
+// ErrorReporter is implemented by a Host that can say why its last call
+// failed (the wasi_webgpu_batch import last_error). A Sink asks it after a
+// failed submit and puts the message in the Error.
+type ErrorReporter interface {
+	LastError(ctx uint32) string
+}
+
+// fail builds the error of a failed host call, with the host's message when
+// it has one.
+func (s *Sink) fail(op string, e Errno) *Error {
+	err := &Error{Op: op, Errno: e}
+	if er, ok := s.h.(ErrorReporter); ok && e != Success {
+		err.Msg = er.LastError(s.ctx)
+	}
+	return err
+}
+
 // Sink is a webgpu.ReadSink on one host context.
 type Sink struct {
 	h    Host
@@ -108,7 +132,7 @@ type Sink struct {
 func NewSink(h Host) (*Sink, error) {
 	buf := make([]byte, 256)
 	if e := h.Caps(buf); e != Success {
-		return nil, &Error{"caps", e}
+		return nil, &Error{Op: "caps", Errno: e}
 	}
 	caps, err := wgpubatch.DecodeCaps(buf)
 	if err != nil {
@@ -119,7 +143,7 @@ func NewSink(h Host) (*Sink, error) {
 	}
 	ctx, e := h.ContextCreate()
 	if e != Success {
-		return nil, &Error{"context_create", e}
+		return nil, &Error{Op: "context_create", Errno: e}
 	}
 	s := &Sink{h: h, ctx: ctx, caps: caps, enc: wgpubatch.NewEncoder(caps.MaxFrame)}
 	s.reset()
@@ -183,7 +207,7 @@ func (s *Sink) flush(window []byte) error {
 		return s.lose(err)
 	}
 	if e := s.h.Submit(s.ctx, frame, window); e != Success {
-		return s.lose(&Error{"submit", e})
+		return s.lose(s.fail("submit", e))
 	}
 	s.subs++
 	s.reset()
@@ -248,7 +272,7 @@ func (s *Sink) Raw(frame, window []byte) error {
 		return err
 	}
 	if e := s.h.Submit(s.ctx, frame, window); e != Success {
-		return s.lose(&Error{"submit", e})
+		return s.lose(s.fail("submit", e))
 	}
 	s.subs++
 	return nil
@@ -263,7 +287,7 @@ func (s *Sink) Close() error {
 	s.done = true
 	err := s.flush(nil)
 	if e := s.h.ContextDestroy(s.ctx); e != Success && err == nil {
-		err = &Error{"context_destroy", e}
+		err = &Error{Op: "context_destroy", Errno: e}
 	}
 	cerr := err
 	if s.err == nil {
