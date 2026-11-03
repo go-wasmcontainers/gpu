@@ -484,6 +484,7 @@ load 6.4 to 7.7, Chromium on the Apple M4 Max):
 | container, WebGPU, f32 kernels, one submit per token | 311 (302-318) | 171 (160-176) |
 | llama.cpp CPU, one core (bottle, openssl 3.5.8) | 1286 (1278-1289) | 529 (521-531) |
 | WebLLM q4f32_1 (docs/llm-baseline) | 2656 | 224 |
+| Firefox 159 | not measured; known slow: about 200 ms per submit (gpu#25, deadline/cancel gpu#26), so one submit per token would give about 5 tok/s | |
 
 **Slower than the one-core CPU reference and than WebLLM on decode: an open
 defect, not optimised yet.** Per token (405 dispatches): 0.13 to 0.2 ms of
