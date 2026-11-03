@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,6 +26,55 @@ import (
 // host accept a software adapter).
 func runBatchCases(t *testing.T, cases []engineCase, launch []string, query string) engineReport {
 	t.Helper()
+	rep := runBatchCasesSanctions(t, cases, launch, query, 0)
+	return rep
+}
+
+// pageQuery joins the page's query parameters: fallback=1 from the
+// environment, and the budget and hard cap in ms (0: the module's defaults),
+// GPU_E2E_BUDGET_MS and GPU_E2E_GPUTIME_MS override them.
+func pageQuery(budgetMs, gpuTimeMs int) string {
+	var q []string
+	if allowFallback() != "" {
+		q = append(q, "fallback=1")
+	}
+	for k, env := range map[string]string{"budget": "GPU_E2E_BUDGET_MS", "gputime": "GPU_E2E_GPUTIME_MS"} {
+		v := os.Getenv(env)
+		if v == "" {
+			switch k {
+			case "budget":
+				v = strconv.Itoa(budgetMs)
+			default:
+				v = strconv.Itoa(gpuTimeMs)
+			}
+		}
+		if n, _ := strconv.Atoi(v); n > 0 {
+			q = append(q, k+"="+v)
+		}
+	}
+	if len(q) == 0 {
+		return ""
+	}
+	slices.Sort(q)
+	return "?" + strings.Join(q, "&")
+}
+
+// runBatchCasesSanctions is runBatchCases for a test that expects exactly
+// `sanctions` GPU sanctions; any other number fails it (a sanction of
+// legitimate work is a false positive). The module's measured submit times
+// are logged either way.
+func runBatchCasesSanctions(t *testing.T, cases []engineCase, launch []string, query string, sanctions int64) engineReport {
+	t.Helper()
+	rep := runBatchCasesRaw(t, cases, launch, query)
+	t.Logf("gpu time budget: %s", rep.GPU)
+	if rep.GPU.Sanctions != sanctions {
+		t.Errorf("%d GPU sanction(s), want %d", rep.GPU.Sanctions, sanctions)
+	}
+	return rep
+}
+
+func runBatchCasesRaw(t *testing.T, cases []engineCase, launch []string, query string) engineReport {
+	t.Helper()
 	root, err := filepath.Abs("..")
 	if err != nil {
 		t.Fatal(err)
@@ -33,6 +83,7 @@ func runBatchCases(t *testing.T, cases []engineCase, launch []string, query stri
 	build(t, root, filepath.Join(site, "enginetest.wasm"), "./internal/cmd/enginetest", "js")
 	build(t, root, filepath.Join(site, "batchcompute.wasm"), "./examples/batchcompute", "wasip1")
 	build(t, root, filepath.Join(site, "hang.wasm"), "./e2e/testdata/hang", "wasip1")
+	build(t, root, filepath.Join(site, "victim.wasm"), "./e2e/testdata/victim", "wasip1")
 	wasmExec, err := os.ReadFile(filepath.Join(runtime.GOROOT(), "lib", "wasm", "wasm_exec.js"))
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +163,7 @@ func TestBatchComputeContainers(t *testing.T) {
 		{Name: "batch-grant", Module: "batchcompute.wasm", GPU: true, GPUMemory: 1 << 30},
 		{Name: "batch-shaders", Module: "batchcompute.wasm", Args: []string{"shaders"}, GPU: true},
 	}
-	rep := runBatchCases(t, cases, launchFallbackArgs(), allowFallback())
+	rep := runBatchCases(t, cases, launchFallbackArgs(), pageQuery(0, 0))
 	requireGPU(t, rep)
 	want := map[string]struct {
 		exit int
@@ -186,7 +237,7 @@ func TestBatchDeadline(t *testing.T) {
 		{Name: "after-refusals", Module: "batchcompute.wasm", Args: []string{"refusals"}, GPU: true},
 		{Name: "after-no-gpu", Module: "batchcompute.wasm"},
 	}
-	rep := runBatchCases(t, cases, launchFallbackArgs(), allowFallback())
+	rep := runBatchCasesSanctions(t, cases, launchFallbackArgs(), pageQuery(0, 0), 1)
 	requireGPU(t, rep)
 	byName := map[string]int{}
 	for i, r := range rep.Results {
@@ -204,7 +255,10 @@ func TestBatchDeadline(t *testing.T) {
 	if ms < 1900 || ms > 3500 {
 		t.Errorf("the host answered after %d ms, want about 2000", ms)
 	}
-	for _, s := range []string{"(timeout as expected: true)", "(device gone as expected: true)"} {
+	if len(h.Events) != 1 || !strings.HasPrefix(h.Events[0], "gpu/sanction ") {
+		t.Errorf("engine events of the hostile container: %q", h.Events)
+	}
+	for _, s := range []string{"(timeout as expected: true)", "(device gone as expected: true)", "(revoked as expected: true)"} {
 		if !strings.Contains(h.Stdout, s) {
 			t.Errorf("hang stdout lacks %q", s)
 		}
@@ -223,6 +277,78 @@ func TestBatchDeadline(t *testing.T) {
 }
 
 var deadlineMs = regexp.MustCompile(`long submit: .* after (\d+) ms`)
+
+// TestBatchComputeQuota: a dispatch of 65535 x 16 workgroups, which the
+// host's compute quota (2^26 invocations per dispatch) refuses, never reaches
+// the GPU: the container gets Refused, not Timeout, and nobody is sanctioned.
+func TestBatchComputeQuota(t *testing.T) {
+	rep := runBatchCasesSanctions(t, []engineCase{{Name: "wide", Module: "hang.wasm", Args: []string{"3000", "wide"}, GPU: true}},
+		launchFallbackArgs(), pageQuery(0, 0), 0)
+	requireGPU(t, rep)
+	r := rep.Results[0]
+	t.Logf("%s (%.0f ms): exit %d\n%s%s", r.Name, r.Ms, r.Exit, r.Stdout, r.Stderr)
+	if r.Exit != 0 || !strings.Contains(r.Stdout, "(refused as expected: true)") {
+		t.Errorf("exit %d (%s), stdout %q", r.Exit, r.Error, r.Stdout)
+	}
+}
+
+var victimStats =regexp.MustCompile(`victim: (\d+) submits, median ([0-9.]+) ms, max ([0-9.]+) ms, errors (\d+)`)
+
+// TestBatchSanction (go-wasmcontainers/gpu#26): a hostile container runs a
+// shader calibrated to about 3 s while a victim container makes short submits
+// throughout. The hostile container is sanctioned once (its device destroyed,
+// its grant revoked: a new context answers Revoked, the engine event is
+// reported); the victim is never sanctioned and its submits keep succeeding
+// and reading back correctly; its worst latency is measured and bounded by
+// what the GPU still held when the hostile's device was destroyed (the
+// remaining work of the shader, which no browser lets the host cancel).
+// "combined" puts the shader's creation and its dispatch in one frame, which
+// the host holds to the hard cap; "split" gives the dispatch a frame of its
+// own, held to the steady-state budget.
+func TestBatchSanction(t *testing.T) {
+	if load := loadAverage(); load > 8 {
+		t.Skipf("1-minute load average %.1f above 8: not measuring", load)
+	}
+	for _, mode := range []string{"combined", "split"} {
+		t.Run(mode, func(t *testing.T) {
+			args := []string{"3000"}
+			if mode == "split" {
+				args = append(args, "split")
+			}
+			cases := []engineCase{
+				{Name: "victim", Module: "victim.wasm", Args: []string{"25000", "20"}, GPU: true, Parallel: true},
+				{Name: "hostile", Module: "hang.wasm", Args: args, GPU: true, DelayMs: 1000},
+			}
+			rep := runBatchCasesSanctions(t, cases, launchFallbackArgs(), pageQuery(0, 0), 1)
+			requireGPU(t, rep)
+			byName := map[string]int{}
+			for i, r := range rep.Results {
+				byName[r.Name] = i
+				t.Logf("%s (%.0f ms): exit %d\n%s%s events %q", r.Name, r.Ms, r.Exit, r.Stdout, r.Stderr, r.Events)
+			}
+			h, v := rep.Results[byName["hostile"]], rep.Results[byName["victim"]]
+			if h.Exit != 0 || !strings.Contains(h.Stdout, "(timeout as expected: true)") || !strings.Contains(h.Stdout, "(revoked as expected: true)") {
+				t.Errorf("hostile: exit %d (%s), stdout %q", h.Exit, h.Error, h.Stdout)
+			}
+			if len(h.Events) != 1 || !strings.HasPrefix(h.Events[0], "gpu/sanction ") || len(v.Events) != 0 {
+				t.Errorf("engine events: hostile %q, victim %q", h.Events, v.Events)
+			}
+			m := victimStats.FindStringSubmatch(v.Stdout)
+			if v.Exit != 0 || m == nil || m[4] != "0" {
+				t.Fatalf("victim: exit %d (%s), stdout %q", v.Exit, v.Error, v.Stdout)
+			}
+			median, _ := strconv.ParseFloat(m[2], 64)
+			worst, _ := strconv.ParseFloat(m[3], 64)
+			t.Logf("MEASURED %s: the victim's median submit %.1f ms, worst case %.1f ms (the hostile's shader aims at 3000 ms)", mode, median, worst)
+			// The worst case is the work the GPU still held after the
+			// destroy, plus a turn: it cannot exceed the shader's own length
+			// by more than the hard cap and some margin.
+			if worst > 3000+2000+1500 {
+				t.Errorf("the victim's worst submit took %.1f ms", worst)
+			}
+		})
+	}
+}
 
 // loadAverage is the 1-minute load average (uptime), or -1.
 func loadAverage() float64 {
@@ -256,7 +382,7 @@ func TestBatchRoundTrip(t *testing.T) {
 		t.Logf("1-minute load average before: %.2f", load)
 	}
 	rep := runBatchCases(t, []engineCase{{Name: "batch-bench", Module: "batchcompute.wasm", Args: []string{"bench", "30"}, GPU: true}},
-		launchFallbackArgs(), allowFallback())
+		launchFallbackArgs(), pageQuery(0, 0))
 	requireGPU(t, rep)
 	r := rep.Results[0]
 	t.Logf("load average after: %.2f\n%s%s", loadAverage(), r.Stdout, r.Stderr)

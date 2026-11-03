@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -28,6 +29,25 @@ type engineCase struct {
 	GPUMemory int64 `json:"gpuMemory,omitempty"`
 	// Models are mounted read-only at /models (see enginetest).
 	Models []engineModel `json:"models,omitempty"`
+	// Parallel starts the container without waiting for it to end before the
+	// next case starts; DelayMs waits that long before starting it.
+	Parallel bool `json:"parallel,omitempty"`
+	DelayMs  int  `json:"delayMs,omitempty"`
+}
+
+// gpuStats is gpubatch.Stats as the worker reports it (durations in ns).
+type gpuStats struct {
+	Submits, Sanctions, Drains      int64
+	MaxSubmit, MaxStream, MaxCreate int64
+	MaxWait                         int64
+	MaxInvocations                  uint64
+	MaxDispatchInvocations          uint64
+}
+
+func (s gpuStats) String() string {
+	ms := func(ns int64) string { return strconv.FormatFloat(float64(ns)/1e6, 'f', 1, 64) + " ms" }
+	return fmt.Sprintf("%d submits, %d sanctions, %d drains; max submit %s (stream-only %s, with creations %s), max wait for a turn %s, max stream %d invocations, max dispatch %d invocations",
+		s.Submits, s.Sanctions, s.Drains, ms(s.MaxSubmit), ms(s.MaxStream), ms(s.MaxCreate), ms(s.MaxWait), s.MaxInvocations, s.MaxDispatchInvocations)
 }
 
 type engineModel struct {
@@ -49,10 +69,13 @@ type engineReport struct {
 		Stderr string  `json:"stderr"`
 		Error  string  `json:"error"`
 		Ms     float64 `json:"ms"`
+		// Events are the host modules' reports (a gpu sanction).
+		Events []string `json:"events"`
 	} `json:"results"`
-	AdapterError       string `json:"adapterError"`
-	Error              string `json:"error"`
-	ConfiguredSurfaces int64  `json:"configuredSurfaces"`
+	GPU                gpuStats `json:"gpu"`
+	AdapterError       string   `json:"adapterError"`
+	Error              string   `json:"error"`
+	ConfiguredSurfaces int64    `json:"configuredSurfaces"`
 }
 
 // enginePage plays the dashboard's part for surfaces: it draws each frame

@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"sync"
 	"syscall/js"
@@ -47,6 +48,10 @@ type Case struct {
 	// models.Mount): each is fetched by ranges from URL (same origin), its
 	// size and sha256 verified before the container starts.
 	Models []ModelRef `json:"models"`
+	// Parallel starts the container without waiting for it to end before the
+	// next case starts; DelayMs waits that long before starting it.
+	Parallel bool `json:"parallel"`
+	DelayMs  int  `json:"delayMs"`
 }
 
 // ModelRef is a model of a case.
@@ -65,6 +70,9 @@ type Result struct {
 	Stderr string  `json:"stderr"`
 	Error  string  `json:"error,omitempty"`
 	Ms     float64 `json:"ms"`
+	// Events are what the container's host modules reported (the engine's
+	// gpu-sanction event, as "module/action k=v ...").
+	Events []string `json:"events,omitempty"`
 }
 
 // Report is what the worker posts.
@@ -78,6 +86,9 @@ type Report struct {
 	// ConfiguredSurfaces is how many surfaces still hold a WebGPU context
 	// once every container has ended: they all dropped theirs, so 0.
 	ConfiguredSurfaces int64 `json:"configuredSurfaces"`
+	// GPU is what the wasi_webgpu_batch module measured: submits, sanctions,
+	// the longest submit within budget.
+	GPU gpubatch.Stats `json:"gpu"`
 }
 
 type buf struct {
@@ -123,7 +134,17 @@ func main() {
 		post()
 		return
 	}
-	allow := js.Global().Get("location").Get("search").String() == "?fallback=1"
+	// Query: fallback=1 lets the host accept a software adapter; budget and
+	// gputime (ms) set the module's steady-state budget and hard cap.
+	params := js.Global().Get("URLSearchParams").New(js.Global().Get("location").Get("search").String())
+	param := func(k string) int {
+		if v := params.Call("get", k); v.Type() == js.TypeString {
+			n, _ := strconv.Atoi(v.String())
+			return n
+		}
+		return 0
+	}
+	allow := param("fallback") == 1
 	if g, err := wg.Navigator(); err != nil {
 		rep.AdapterError = "navigator.gpu: " + err.Error()
 	} else if a, err := g.RequestAdapter(context.Background(), &wg.RequestAdapterOptions{AllowFallback: true}); err != nil {
@@ -184,17 +205,41 @@ func main() {
 		return nil
 	}))
 	mods := webgpu.HostModules(webgpu.Browser{AllowFallback: allow, OnSurface: onSurface})
+	batchMod := gpubatch.NewModule(gpubatch.Browser{AllowFallback: allow})
+	batchMod.Limits.Budget = time.Duration(param("budget")) * time.Millisecond
+	batchMod.Limits.GPUTime = time.Duration(param("gputime")) * time.Millisecond
 	exec := browser.New(browser.Options{
 		WorkerURL:   "container-worker.js",
-		HostModules: append(append(mods, wasi.HostModule(nnMod)), gpubatch.HostModules(gpubatch.Browser{AllowFallback: allow})...),
+		HostModules: append(append(mods, wasi.HostModule(nnMod)), batchMod),
 	})
-	for _, c := range cases {
+	rep.Results = make([]Result, len(cases))
+	var running sync.WaitGroup
+	for i, c := range cases {
+		i, c := i, c
+		if c.DelayMs > 0 {
+			time.Sleep(time.Duration(c.DelayMs) * time.Millisecond)
+		}
+		if c.Parallel {
+			running.Add(1)
+			go func() { defer running.Done(); rep.Results[i] = runCase(exec, c) }()
+			continue
+		}
+		rep.Results[i] = runCase(exec, c)
+	}
+	running.Wait()
+	rep.GPU = batchMod.Stats()
+	rep.ConfiguredSurfaces = webgpu.ConfiguredSurfaces()
+	post()
+}
+
+// runCase runs one container to its end.
+func runCase(exec runtime.Executor, c Case) Result {
+	{
 		r := Result{Name: c.Name}
 		wasm, err := fetch(c.Module)
 		if err != nil {
 			r.Error = err.Error()
-			rep.Results = append(rep.Results, r)
-			continue
+			return r
 		}
 		fsys := rootfs.New()
 		fsys.MkdirAll("/bin", 0o755)
@@ -205,13 +250,27 @@ func main() {
 			mfs, err := modelMount(c.Models)
 			if err != nil {
 				r.Error = err.Error()
-				rep.Results = append(rep.Results, r)
-				continue
+				return r
 			}
 			mounts = append(mounts, runtime.Mount{Path: "/models", FS: mfs, ReadOnly: true})
 		}
 		spec := runtime.Spec{ID: "c-" + c.Name, FS: fsys, Path: "/bin/guest.wasm", Args: append([]string{c.Name}, c.Args...), Stdout: &so, Stderr: &se, Mounts: mounts,
 			MemoryLimitBytes: 512 << 20, Timeout: 2 * time.Minute}
+		var evMu sync.Mutex
+		spec.OnEvent = func(module, action string, attrs map[string]string) {
+			keys := make([]string, 0, len(attrs))
+			for k := range attrs {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			s := module + "/" + action
+			for _, k := range keys {
+				s += " " + k + "=" + attrs[k]
+			}
+			evMu.Lock()
+			r.Events = append(r.Events, s)
+			evMu.Unlock()
+		}
 		if c.GPU {
 			spec.Caps = []string{"gpu"}
 			if c.GPUMemory > 0 {
@@ -222,8 +281,7 @@ func main() {
 		p, err := exec.Start(context.Background(), spec)
 		if err != nil {
 			r.Error = err.Error()
-			rep.Results = append(rep.Results, r)
-			continue
+			return r
 		}
 		res := p.Wait()
 		r.Ms = float64(time.Since(t0).Microseconds()) / 1000
@@ -231,10 +289,11 @@ func main() {
 		if res.Error != "" {
 			r.Error = res.Error
 		}
-		rep.Results = append(rep.Results, r)
+		evMu.Lock()
+		r.Events = append([]string(nil), r.Events...)
+		evMu.Unlock()
+		return r
 	}
-	rep.ConfiguredSurfaces = webgpu.ConfiguredSurfaces()
-	post()
 }
 
 // modelMount verifies the models of a case and returns the tree mounted at

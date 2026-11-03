@@ -75,7 +75,8 @@ func runLLMCases(t *testing.T, env llmEnv, cases []engineCase, extraArgs []strin
 	build(t, root, filepath.Join(site, "enginetest.wasm"), "./internal/cmd/enginetest", "js")
 	cmd := exec.Command("go", "build", "-o", filepath.Join(site, "generate.wasm"), "./examples/generate")
 	cmd.Dir = env.repo
-	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm", "CGO_ENABLED=0")
+	// GOFLAGS= : a -modfile of this repository's must not leak into llm's own module.
+	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm", "CGO_ENABLED=0", "GOFLAGS=")
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build the llm container: %v\n%s", err, b)
 	}
@@ -132,7 +133,7 @@ func runLLMCases(t *testing.T, env llmEnv, cases []engineCase, extraArgs []strin
 	}
 	var console []string
 	p.On("console", func(m playwright.ConsoleMessage) { console = append(console, m.Text()) })
-	if _, err := p.Goto(origin + "/index.html"); err != nil {
+	if _, err := p.Goto(origin + "/index.html" + pageQuery(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := p.WaitForFunction("() => window.__report !== undefined", nil, playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(1800000)}); err != nil {
@@ -148,6 +149,12 @@ func runLLMCases(t *testing.T, env llmEnv, cases []engineCase, extraArgs []strin
 	}
 	if len(rep.Results) != len(cases) {
 		t.Fatalf("%d results for %d cases", len(rep.Results), len(cases))
+	}
+	// The GPU time budget (go-wasmcontainers/gpu#26) must never trip on the
+	// LLM kernels: no false positive, and the longest submit is on record.
+	t.Logf("gpu time budget: %s", rep.GPU)
+	if rep.GPU.Sanctions != 0 {
+		t.Errorf("%d GPU sanction(s) on legitimate LLM work", rep.GPU.Sanctions)
 	}
 	if len(console) > 0 {
 		t.Logf("browser console:\n%s", strings.Join(console, "\n"))

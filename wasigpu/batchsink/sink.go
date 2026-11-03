@@ -52,15 +52,17 @@ const (
 	QuotaExceeded   Errno = 5
 	Refused         Errno = 6 // the frame or stream was refused; the context is lost
 	ContextLost     Errno = 7
-	Timeout         Errno = 8 // 2 s of GPU time exceeded; the device is destroyed
+	Timeout         Errno = 8 // a submit overran its time budget; the device is destroyed and the grant revoked
 	Fault           Errno = 9
 	Failed          Errno = 10
 	InvalidShader   Errno = 11 // WGSL that does not compile, or an object WebGPU rejects; the context is lost, Error.Msg says why
+	Revoked         Errno = 12 // an earlier submit overran its budget: no GPU for the rest of the container's life
 )
 
 var errnoNames = [...]string{"success", "invalid argument", "denied (the container has no GPU: run --gpu)",
 	"unsupported (no GPU here, or only a fallback adapter)", "too large", "quota exceeded", "refused",
-	"context lost", "timeout (2 s of GPU time)", "fault", "failed", "invalid shader or object (the GPU refused it)"}
+	"context lost", "timeout (a submit overran its GPU time budget; the GPU grant is revoked)", "fault", "failed",
+	"invalid shader or object (the GPU refused it)", "revoked (an earlier submit overran its GPU time budget)"}
 
 // Error is a host error.
 type Error struct {

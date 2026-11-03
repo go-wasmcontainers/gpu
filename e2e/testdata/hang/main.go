@@ -1,13 +1,22 @@
 //go:build !js
 
-// Command hang is the guest of the GPU-time deadline e2e: it submits a
-// compute shader that runs far longer than the host's 2 s of GPU time, sized
-// from the adapter's limits and from a calibration on the adapter itself
-// (every workgroup the device allows in X, 16 in Y; the per-invocation loop
-// is scaled until the shader needs about TARGET ms), and reports what the
-// host answered.
+// Command hang is the hostile guest of the GPU time budget e2e: it submits a
+// compute shader that runs far longer than the host's budget, sized from the
+// adapter's limits and from a calibration on the adapter itself (every
+// workgroup the device allows in X, 16 in Y; the per-invocation loop is
+// scaled until the shader needs about TARGET ms), and reports what the host
+// answered.
 //
-//	hang [TARGET_MS]
+//	hang [TARGET_MS [split]]
+//
+// By default the shader module, the pipeline and the dispatch are in one
+// frame, which the host holds to its hard cap (frames that create objects
+// may compile). With "split" the objects are created and flushed in a first
+// frame and the long dispatch is a frame of its own, which the host holds to
+// the steady-state budget.
+//
+// After the overrun it checks what the sanction promises: the device is
+// gone, a new context is refused as revoked.
 package main
 
 import (
@@ -41,10 +50,13 @@ type rig struct {
 	pl     *webgpu.PipelineLayout
 	bg     *webgpu.BindGroup
 	gx, gy uint32
+	split  bool
 }
 
 // submit compiles the shader for iters and dispatches it; it returns the
-// error of the submit and how long it took.
+// error of the submit and how long it took. In split mode the objects go in
+// a first frame (a one-workgroup dispatch, not timed) and the long dispatch
+// is a frame of its own.
 func (r *rig) submit(iters uint64) (time.Duration, error) {
 	m, err := r.d.CreateShaderModule(webgpu.ShaderModuleDescriptor{Code: shader(iters)})
 	if err != nil {
@@ -54,31 +66,40 @@ func (r *rig) submit(iters uint64) (time.Duration, error) {
 	if err != nil {
 		return 0, err
 	}
-	rec := r.d.NewRecorder()
-	p := rec.BeginComputePass()
-	p.SetPipeline(pipe)
-	p.SetBindGroup(0, r.bg)
-	p.DispatchWorkgroups(r.gx, r.gy, 1)
-	if err := p.End(); err != nil {
-		return 0, err
+	dispatch := func(gx, gy uint32) (time.Duration, error) {
+		rec := r.d.NewRecorder()
+		p := rec.BeginComputePass()
+		p.SetPipeline(pipe)
+		p.SetBindGroup(0, r.bg)
+		p.DispatchWorkgroups(gx, gy, 1)
+		if err := p.End(); err != nil {
+			return 0, err
+		}
+		t0 := time.Now()
+		_, err := rec.Submit()
+		return time.Since(t0), err
 	}
-	t0 := time.Now()
-	_, err = rec.Submit()
-	return time.Since(t0), err
+	if r.split {
+		if _, err := dispatch(1, 1); err != nil {
+			return 0, err
+		}
+	}
+	return dispatch(r.gx, r.gy)
 }
 
 func main() {
-	// 3 s: over the 2 s deadline, and the GPU has only about 1 s of the work
-	// left to drain when the device is destroyed. destroy() does not cancel
-	// work the GPU already holds, and a container started in that window
-	// queues behind it (with 5 s, Firefox's next container hit its own 2 s
-	// deadline; filed as an issue).
+	// 3 s: over the 2 s hard cap, and the GPU still holds about a second of
+	// the work when the device is destroyed. destroy() does not cancel work
+	// the GPU already holds (go-wasmcontainers/gpu#26): the host waits for
+	// it to drain before it serves anyone else.
 	target := 3000.0
+	split := false
 	if len(os.Args) > 1 {
 		if n, err := strconv.ParseFloat(os.Args[1], 64); err == nil && n > 0 {
 			target = n
 		}
 	}
+	split = len(os.Args) > 2 && os.Args[2] == "split"
 	s, err := batchsink.Open()
 	var be *batchsink.Error
 	if errors.Is(err, batchsink.ErrUnavailable) || errors.As(err, &be) && (be.Errno == batchsink.Denied || be.Errno == batchsink.Unsupported) {
@@ -98,16 +119,31 @@ func main() {
 	must(err)
 	bg, err := d.CreateBindGroup(webgpu.BindGroupDescriptor{Layout: bgl, Entries: []webgpu.BindGroupEntry{{Binding: 0, Buffer: buf}}})
 	must(err)
-	r := &rig{d: d, bgl: bgl, pl: pl, bg: bg, gx: 1, gy: 1}
+	r := &rig{d: d, bgl: bgl, pl: pl, bg: bg, gx: 1, gy: 1, split: split}
 	maxX := c.Device.MaxComputeWorkgroupsPerDimension
+	if len(os.Args) > 2 && os.Args[2] == "wide" {
+		// A dispatch past the host's compute quota is refused before it
+		// reaches the GPU: Refused, not Timeout, and no sanction.
+		r.gx, r.gy = maxX, 16
+		_, err := r.submit(1)
+		ok := errors.As(err, &be) && be.Errno == batchsink.Refused
+		fmt.Printf("wide dispatch %d x 16: %v (refused as expected: %v)\n", maxX, err, ok)
+		if !ok {
+			os.Exit(1)
+		}
+		return
+	}
 
 	// Calibrate: double the work (X workgroups up to the device limit, then
-	// 16 in Y, then the loop) until one submit takes 250 ms, well under the
-	// 2 s deadline even on a software adapter, then scale the loop to the
-	// target.
+	// 16 in Y, then the loop) until one submit takes `stop`, well under the
+	// budget it must not trip, then scale the loop to the target.
 	// A submit also has a fixed latency (about 200 ms in Firefox, which
 	// quantises read-back): measure it on an empty-ish shader and subtract
 	// it, or the calibration would stop at the latency, not at GPU work.
+	stop := 250 * time.Millisecond
+	if split {
+		stop = 40 * time.Millisecond // the doubling may overshoot: stay far under the budget
+	}
 	lat := time.Hour
 	for i := 0; i < 3; i++ {
 		l, err := r.submit(1)
@@ -119,13 +155,17 @@ func main() {
 	for {
 		took, err = r.submit(iters)
 		must(err)
-		if took-lat >= 250*time.Millisecond || iters >= 1<<31 {
+		if took-lat >= stop || iters >= 1<<31 {
 			break
 		}
 		switch {
 		case r.gx < maxX:
 			r.gx = min(r.gx*2, maxX)
-		case r.gy < 16:
+		case r.gy < 4:
+			// 65535 x 4 workgroups, counted at the device's 256-invocation
+			// workgroup bound, is 67,107,840 invocations: just under the
+			// host's dispatch quota (2^26). The loop makes up the rest of the
+			// time: a quota on the size of the dispatch cannot bound a loop.
 			r.gy *= 2
 		default:
 			iters *= 2
@@ -139,8 +179,8 @@ func main() {
 	if iters > 1<<32-1 {
 		iters = 1<<32 - 1
 	}
-	fmt.Printf("dispatch %d x %d workgroups of 64; calibration took %d ms (latency %d ms); %d iterations aim at %.0f ms\n",
-		r.gx, r.gy, took.Milliseconds(), lat.Milliseconds(), iters, target)
+	fmt.Printf("dispatch %d x %d workgroups of 64; calibration took %d ms (latency %d ms); %d iterations aim at %.0f ms (split %v)\n",
+		r.gx, r.gy, took.Milliseconds(), lat.Milliseconds(), iters, target, split)
 
 	took, err = r.submit(iters)
 	ms := took.Milliseconds()
@@ -149,9 +189,14 @@ func main() {
 	fmt.Printf("long submit: %v after %d ms (timeout as expected: %v)\n", err, ms, ok)
 	// The device is destroyed: every later call fails, as an error.
 	_, err = r.submit(1)
-	ok2 := err != nil && (errors.Is(err, webgpu.ErrDestroyed) || errors.As(err, &e) && e.Errno == batchsink.ContextLost || strings.Contains(err.Error(), "lost"))
+	ok2 := err != nil && (errors.Is(err, webgpu.ErrDestroyed) || errors.As(err, &e) && (e.Errno == batchsink.ContextLost || e.Errno == batchsink.Revoked) || strings.Contains(err.Error(), "lost"))
 	fmt.Printf("next submit: %v (device gone as expected: %v)\n", err, ok2)
-	if !ok || !ok2 {
+	// The grant is revoked for the container's life: a new context is refused
+	// with the documented errno, and so is a new connection to the module.
+	_, err = batchsink.Open()
+	ok3 := errors.As(err, &e) && e.Errno == batchsink.Revoked
+	fmt.Printf("new context: %v (revoked as expected: %v)\n", err, ok3)
+	if !ok || !ok2 || !ok3 {
 		os.Exit(1)
 	}
 }

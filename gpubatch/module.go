@@ -63,7 +63,7 @@ const (
 	QuotaExceeded   Errno = 5  // contexts, GPU memory, pipelines, WGSL size
 	Refused         Errno = 6  // a frame or stream the host refuses; the context is lost
 	ContextLost     Errno = 7  // the context was lost earlier
-	Timeout         Errno = 8  // a submit still running after GPUTime: the device is destroyed
+	Timeout         Errno = 8  // a submit over its time budget: the device is destroyed, the grant revoked
 	Fault           Errno = 9  // a guest address range outside its memory
 	Failed          Errno = 10 // the backend failed
 	// InvalidShader: the GPU refused an object the guest described: WGSL that
@@ -71,6 +71,9 @@ const (
 	// The context is lost; last_error returns the compiler's message (WGSL
 	// line and column included).
 	InvalidShader Errno = 11
+	// Revoked: the grant was revoked by an earlier Timeout: every call but
+	// context_destroy answers it, for the container's life.
+	Revoked Errno = 12
 )
 
 // MaxErrorMessage bounds the text last_error returns.
@@ -78,11 +81,26 @@ const MaxErrorMessage = 1024
 
 // Limits bound one container's use of the module.
 type Limits struct {
-	Contexts   int           // live contexts (default 4)
-	MaxFrame   uint32        // largest frame, bytes (default 32 MiB)
-	MaxObjects uint32        // guest ids per context (default 4096)
-	MaxRead    uint32        // read window of one submit (default 1 MiB, at most wire.MaxReadWindow)
-	GPUTime    time.Duration // one submit's wait for the GPU (default 2 s)
+	Contexts   int    // live contexts (default 4)
+	MaxFrame   uint32 // largest frame, bytes (default 32 MiB)
+	MaxObjects uint32 // guest ids per context (default 4096)
+	MaxRead    uint32 // read window of one submit (default 1 MiB, at most wire.MaxReadWindow)
+	// GPUTime is the hard cap of one submit's time on the GPU (default 2 s):
+	// what a frame that creates objects (shader and pipeline compilation
+	// included) may take. Budget is the steady-state budget of a frame that
+	// only streams commands (default 500 ms: the longest legitimate submit
+	// measured is 202 ms in Firefox, 13 ms in Chromium; docs/gpu-scheduling.md), at most GPUTime. Both run from
+	// the moment the submit gets its turn, not from when it was queued.
+	GPUTime, Budget time.Duration
+	// DrainTime bounds how long the host waits, after a sanction, for the
+	// destroyed device's remaining work to leave the GPU before it serves
+	// the next turn (default 30 s).
+	DrainTime time.Duration
+	// MaxDispatchInvocations and MaxStreamInvocations are the compute quota
+	// of one context: no Dispatch, and no stream, may ask for more
+	// invocations (workgroup counts times the device's largest workgroup;
+	// wire.CheckInvocations). 0: DefaultLimits'.
+	MaxDispatchInvocations, MaxStreamInvocations uint64
 	// Memory is the GPU memory quota when the container made no grant
 	// (default 256 MiB). MaxMemory is the largest grant honoured (1.5 GiB).
 	Memory, MaxMemory int64
@@ -90,7 +108,8 @@ type Limits struct {
 
 // DefaultLimits are the quotas of the design (docs/llm-design.md).
 var DefaultLimits = Limits{
-	Contexts: 4, MaxFrame: 32 << 20, MaxObjects: 4096, MaxRead: 1 << 20, GPUTime: 2 * time.Second,
+	Contexts: 4, MaxFrame: 32 << 20, MaxObjects: 4096, MaxRead: 1 << 20, GPUTime: 2 * time.Second, Budget: 500 * time.Millisecond, DrainTime: 30 * time.Second,
+	MaxDispatchInvocations: 1 << 26, MaxStreamInvocations: 1 << 30,
 	Memory: 256 << 20, MaxMemory: 1610612736,
 }
 
@@ -105,6 +124,14 @@ type Provider interface {
 
 // ErrFallback: the provider refuses a fallback (software) adapter.
 var ErrFallback = errors.New("gpubatch: only a fallback adapter")
+
+// Drainer is a Provider that can wait until the GPU has finished the work
+// of a destroyed device (WebGPU's destroy() does not cancel submitted work).
+// Drain returns when a trivial submit on a device the provider owns has
+// completed, or after timeout. A Provider without it gets no drain wait.
+type Drainer interface {
+	Drain(timeout time.Duration) error
+}
 
 // Device is one container's GPU device, shared by its contexts.
 type Device interface {
@@ -123,6 +150,24 @@ type Module struct {
 	// Provider opens devices; nil: Unsupported everywhere (native).
 	Provider Provider
 	Limits   Limits
+
+	sched   sched    // the GPU's turns, shared by every container
+	revoked sync.Map // container label -> true: grants revoked for the container's life
+	smu     sync.Mutex
+	stats   Stats
+}
+
+// Stats returns what the module measured so far.
+func (m *Module) Stats() Stats {
+	m.smu.Lock()
+	defer m.smu.Unlock()
+	return m.stats
+}
+
+func (m *Module) record(f func(s *Stats)) {
+	m.smu.Lock()
+	f(&m.stats)
+	m.smu.Unlock()
 }
 
 // NewModule returns the module over a provider (nil: no GPU).
@@ -172,6 +217,19 @@ func (m *Module) limits() Limits {
 	if l.GPUTime <= 0 {
 		l.GPUTime = d.GPUTime
 	}
+	if l.Budget <= 0 {
+		l.Budget = d.Budget
+	}
+	l.Budget = min(l.Budget, l.GPUTime)
+	if l.DrainTime <= 0 {
+		l.DrainTime = d.DrainTime
+	}
+	if l.MaxDispatchInvocations == 0 {
+		l.MaxDispatchInvocations = d.MaxDispatchInvocations
+	}
+	if l.MaxStreamInvocations == 0 {
+		l.MaxStreamInvocations = d.MaxStreamInvocations
+	}
 	if l.Memory <= 0 {
 		l.Memory = d.Memory
 	}
@@ -183,8 +241,13 @@ func (m *Module) limits() Limits {
 
 // Open implements wasi.HostModule.
 func (m *Module) Open(p *wasi.Proc) wasi.Instance {
-	in := &instance{m: m, lim: m.limits(), gpu: p.HasCap("gpu"), ctxs: map[uint32]*gctx{}}
+	in := &instance{m: m, lim: m.limits(), gpu: p.HasCap("gpu"), ctxs: map[uint32]*gctx{}, proc: p, key: p.Label(), quit: make(chan struct{})}
 	in.memory = in.lim.Memory
+	if in.key != "" {
+		if _, ok := m.revoked.Load(in.key); ok {
+			in.revoked.Store(true) // a restarted container is still sanctioned
+		}
+	}
 	if v, ok := p.CapValue("gpu-memory"); ok {
 		// A grant that is not a number in range is a configuration error:
 		// the module fails closed rather than falling back to a default.
@@ -203,10 +266,11 @@ type gctx struct {
 	c    *batch.Context
 	lost atomic.Bool
 	// closed: release was called; no frame runs on a closed context.
-	closed atomic.Bool
-	mu     sync.Mutex // held while a frame runs: a batch.Context is not concurrent
-	errMu  sync.Mutex
-	errMsg string // the last failure's message
+	closed             atomic.Bool
+	peak, peakDispatch atomic.Uint64 // batch.Context's peaks after the last frame
+	mu                 sync.Mutex    // held while a frame runs: a batch.Context is not concurrent
+	errMu              sync.Mutex
+	errMsg             string // the last failure's message
 }
 
 // release closes the context's backend. If a frame is still running (the
@@ -230,6 +294,11 @@ type instance struct {
 	lim    Limits
 	gpu    bool
 	memory int64
+
+	proc    *wasi.Proc
+	key     string        // the container's label: revocations outlive a process
+	quit    chan struct{} // closed by Close: a submit waiting for its turn gives up
+	revoked atomic.Bool
 
 	openMu sync.Mutex // serialises Provider.Open, which waits on the platform
 	mu     sync.Mutex
@@ -267,6 +336,8 @@ func (in *instance) Call(fn int, a []uint64, m wasi.Memory) wasi.Result {
 		return r(Failed)
 	case !in.gpu:
 		return r(Denied)
+	case in.revoked.Load() && fn != fnContextDestroy:
+		return r(Revoked)
 	case in.m.Provider == nil:
 		return r(Unsupported)
 	}
@@ -369,7 +440,8 @@ func (in *instance) contextCreate(out uint32, m wasi.Memory) wasi.Result {
 			return e
 		}
 		_, dl := d.Caps()
-		c := &gctx{c: batch.New(d.Backend(), batch.Config{MaxObjects: in.lim.MaxObjects, MaxRead: in.lim.MaxRead, MaxWorkgroups: dl.MaxComputeWorkgroupsPerDimension})}
+		c := &gctx{c: batch.New(d.Backend(), batch.Config{MaxObjects: in.lim.MaxObjects, MaxRead: in.lim.MaxRead, MaxWorkgroups: dl.MaxComputeWorkgroupsPerDimension,
+			WorkgroupInvocations: dl.MaxComputeInvocationsPerWorkgroup, MaxDispatchInvocations: in.lim.MaxDispatchInvocations, MaxStreamInvocations: in.lim.MaxStreamInvocations})}
 		in.mu.Lock()
 		defer in.mu.Unlock()
 		if in.closed || len(in.ctxs) >= in.lim.Contexts {
@@ -438,28 +510,13 @@ func (in *instance) submit(h, frame, flen, read, rlen uint32, m wasi.Memory) was
 	}
 	window := make([]byte, rlen)
 
-	var finished atomic.Bool
-	var timedOut bool
 	done := make(chan struct{})
 	var e Errno
-	timer := time.AfterFunc(in.lim.GPUTime, func() {
-		if finished.CompareAndSwap(false, true) {
-			timedOut = true
-			in.loseDevice()
-			close(done)
-		}
-	})
 	go func() {
-		e = in.runFrame(c, fr, window)
-		timer.Stop()
-		if finished.CompareAndSwap(false, true) {
-			close(done)
-		}
+		e = in.runSubmit(c, fr, window)
+		close(done)
 	}()
 	return wasi.Result{Wait: done, Resume: func(m wasi.Memory) wasi.Result {
-		if timedOut {
-			return r(Timeout)
-		}
 		if e != Success {
 			return r(e)
 		}
@@ -470,8 +527,107 @@ func (in *instance) submit(h, frame, flen, read, rlen uint32, m wasi.Memory) was
 	}}
 }
 
-// loseDevice destroys the container's device (GPU time exceeded): every
-// context is lost, and the module opens no new device.
+// runSubmit is one submit's life on the host: decode (a refusal costs no
+// turn), wait for the GPU's turn (one submit in flight in the whole module,
+// round-robin between containers), run the frame under its time budget, and
+// on an overrun sanction the container. The budget runs from the start of
+// the turn, so a container never pays for the turns of others.
+func (in *instance) runSubmit(c *gctx, frame, window []byte) Errno {
+	lim := wgpubatch.Limits{MaxFrame: in.lim.MaxFrame, MaxObjects: in.lim.MaxObjects}
+	msgs, err := wgpubatch.Decode(frame, lim)
+	if err != nil {
+		c.lost.Store(true)
+		c.release()
+		return Refused
+	}
+	// A frame that creates objects may compile shaders and pipelines, which
+	// no budget of the steady state fits: it gets the hard cap.
+	budget, creates := in.lim.Budget, false
+	for _, msg := range msgs {
+		if msg.Type == wgpubatch.MsgCreate {
+			budget, creates = in.lim.GPUTime, true
+			break
+		}
+	}
+	queued := time.Now()
+	rel, err := in.m.sched.acquire(in, in.quit)
+	if err != nil {
+		return Failed // the process ended while it waited
+	}
+	if in.revoked.Load() { // sanctioned while this submit waited behind its own
+		rel(nil)
+		return Revoked
+	}
+	t0 := time.Now()
+	res := make(chan Errno, 1)
+	go func() { res <- in.runFrame(c, msgs, lim, window) }()
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	select {
+	case e := <-res:
+		el := time.Since(t0)
+		rel(nil)
+		in.m.record(func(s *Stats) {
+			s.Submits++
+			s.MaxWait = max(s.MaxWait, t0.Sub(queued))
+			s.MaxSubmit = max(s.MaxSubmit, el)
+			if creates {
+				s.MaxCreate = max(s.MaxCreate, el)
+			} else {
+				s.MaxStream = max(s.MaxStream, el)
+			}
+			s.MaxInvocations = max(s.MaxInvocations, c.peak.Load())
+			s.MaxDispatchInvocations = max(s.MaxDispatchInvocations, c.peakDispatch.Load())
+		})
+		return e
+	case <-timer.C:
+		el := time.Since(t0)
+		in.sanction(el, budget, creates)
+		// The GPU still holds the destroyed device's work: keep the turn
+		// until it has left, so the next container's clock starts on an
+		// idle GPU.
+		rel(in.drain)
+		return Timeout
+	}
+}
+
+// drain waits for the work of a destroyed device to leave the GPU, if the
+// provider can tell.
+func (in *instance) drain() {
+	d, ok := in.m.Provider.(Drainer)
+	if !ok {
+		return
+	}
+	in.m.record(func(s *Stats) { s.Drains++ })
+	d.Drain(in.lim.DrainTime)
+}
+
+// sanction destroys the container's device, revokes its GPU grant for the
+// rest of its life (even across a restart of the same container, until the
+// engine itself restarts), and reports it to the engine (event and inspect).
+// Every context of the container is lost with the device.
+func (in *instance) sanction(el, budget time.Duration, creates bool) {
+	in.revoked.Store(true)
+	if in.key != "" {
+		in.m.revoked.Store(in.key, true)
+	}
+	in.m.record(func(s *Stats) { s.Sanctions++ })
+	in.loseDevice()
+	if in.proc != nil {
+		kind := "stream"
+		if creates {
+			kind = "create"
+		}
+		in.proc.Emit("gpu", "sanction", map[string]string{
+			"reason":    "a GPU submit overran its time budget; the GPU grant is revoked",
+			"submit_ms": strconv.FormatInt(el.Milliseconds(), 10), "budget_ms": strconv.FormatInt(budget.Milliseconds(), 10),
+			"frame": kind,
+		})
+	}
+}
+
+// loseDevice destroys the container's device: every context is lost, and
+// the module opens no new device.
 func (in *instance) loseDevice() {
 	in.mu.Lock()
 	d := in.dev
@@ -484,9 +640,9 @@ func (in *instance) loseDevice() {
 	}
 }
 
-// runFrame decodes and applies a frame. Any error loses the context and
+// runFrame applies a decoded frame. Any error loses the context and
 // releases what it held.
-func (in *instance) runFrame(c *gctx, frame, window []byte) (e Errno) {
+func (in *instance) runFrame(c *gctx, msgs []wgpubatch.Message, lim wgpubatch.Limits, window []byte) (e Errno) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed.Load() {
@@ -498,11 +654,6 @@ func (in *instance) runFrame(c *gctx, frame, window []byte) (e Errno) {
 			c.c.Close()
 		}
 	}()
-	lim := wgpubatch.Limits{MaxFrame: in.lim.MaxFrame, MaxObjects: in.lim.MaxObjects}
-	msgs, err := wgpubatch.Decode(frame, lim)
-	if err != nil {
-		return Refused
-	}
 	for _, msg := range msgs {
 		var err error
 		switch msg.Type {
@@ -529,6 +680,8 @@ func (in *instance) runFrame(c *gctx, frame, window []byte) (e Errno) {
 			return errno(err)
 		}
 	}
+	c.peak.Store(c.c.PeakInvocations())
+	c.peakDispatch.Store(c.c.PeakDispatchInvocations())
 	return Success
 }
 
@@ -601,6 +754,9 @@ func errno(err error) Errno {
 // device. A Resume that runs later answers Failed or does nothing.
 func (in *instance) Close() {
 	in.mu.Lock()
+	if !in.closed {
+		close(in.quit)
+	}
 	in.closed = true
 	ctxs, d := in.ctxs, in.dev
 	in.ctxs, in.dev = map[uint32]*gctx{}, nil

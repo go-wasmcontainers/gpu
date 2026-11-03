@@ -85,7 +85,15 @@ container); this is its blocks M3 to M6.
   (`wire.CheckRanges`: writes, copies, indirect arguments, dispatch sizes) are
   checked **before** WebGPU sees anything; a refused frame loses its context
   and releases what it held; the guest memory is written only inside the
-  `read` window; a submit not done after 2 s destroys the device. Without
+  `read` window. GPU time is scheduled and budgeted
+  ([docs/gpu-scheduling.md](docs/gpu-scheduling.md)): one submit in flight
+  across all containers, served round-robin; each submit has a time budget
+  from the moment it gets its turn (250 ms for a frame that only streams
+  commands, 2 s for a frame that creates objects), and a container whose
+  submit overruns has its device destroyed and its GPU grant revoked for the
+  rest of its life (*timeout* once, then *revoked*; the engine reports a
+  `gpu-sanction` event and `wctr inspect` shows `State.Sanction`); a compute
+  quota (`wire.CheckInvocations`) refuses oversized dispatches up front. Without
   `--gpu` every function answers *denied*; without a GPU backend (native) or
   with only a software adapter, *unsupported*. `FuzzBatchCalls` drives
   arbitrary calls over arbitrary guest memory.
