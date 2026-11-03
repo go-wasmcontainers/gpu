@@ -176,6 +176,28 @@ jobs:
           cat "$RUNNER_TEMP/e2e.log"
           exit $status
 
+  # The same e2e in the runner's own Firefox (no Playwright: the page posts
+  # its report to the test server). Firefox runs headed here: headless gets
+  # no adapter. The lane fails, never skips, without a non-fallback adapter.
+  webgpu-firefox:
+    name: WebGPU e2e (Firefox, macOS)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version: '1.27.3' }
+      - run: /Applications/Firefox.app/Contents/MacOS/firefox --version
+      - name: go test -tags e2e (Firefox)
+        shell: bash
+        env:
+          GPU_E2E_BROWSER: firefox
+        run: |
+          status=0
+          go test -tags e2e -count=1 -v -timeout 15m -run 'TestBatch|TestWebGPUBackend' ./e2e/ > "$RUNNER_TEMP/e2e.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/e2e.log"
+          exit $status
+
   cross:
     name: cross ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest

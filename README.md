@@ -212,6 +212,29 @@ reference. The CI lanes: macOS (must get a GPU adapter, or fail) and Linux
 on SwiftShader (labelled fallback: proves the WGSL, not a GPU).
 `internal/cmd/gpuprobe` reports what adapter a browser offers.
 
+### Browser support
+
+| Browser | Platform | WebGPU | e2e (batch module, ONNX tests, MNIST, refusals, 2 s deadline) |
+|---|---|---|---|
+| Chromium 151 | macOS, Apple M4 Max (Metal) | yes | passes (123/123 ONNX cases) |
+| Firefox 159 | macOS 27, Apple M4 Max | yes in a normal window; `--headless` answers `requestAdapter` with null | passes, **headed** (123/123, MNIST-12 within 3.1e-5, 2 s deadline at 2000 ms) |
+| Firefox | Windows | since 141 | not run here |
+| Firefox | macOS, Apple silicon | 145 (Tahoe), 147 (older macOS); not Intel | see the row above |
+| Firefox | Linux | not supported (MDN browser-compat-data `api.GPU`, bug 2006676) | none |
+
+Sources opened: MDN browser-compat-data `api/GPU.json` (Firefox
+`version_added` 141, partial; the per-platform notes above) and the Firefox
+141 release notes (Windows). The Firefox lane drives the real Firefox binary
+(`GPU_E2E_BROWSER=firefox go test -tags e2e ./e2e/`, no automation protocol:
+the page posts its report to the test server). Playwright's own Firefox build
+(Nightly 1538) does not start on macOS 27 in this setup (its Juggler handshake
+times out, a helper process is killed). Firefox hides the adapter's vendor
+and architecture, so the lane relies on `isFallbackAdapter`; it fails, never
+skips, when `requestAdapter` returns null. Firefox 159 offers `shader-f16`;
+the f32 path stays mandatory (older Firefox, other platforms). Known:
+a submit costs about 200 ms in Firefox 159 (quantised read-back), against
+well under 1 ms in Chromium (see the open issue).
+
 ## `onnx`
 
 Loads an ONNX model (`onnx.proto`, decoded by a bounded protobuf reader)
