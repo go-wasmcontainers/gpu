@@ -89,6 +89,17 @@ container); this is its blocks M3 to M6.
   `--gpu` every function answers *denied*; without a GPU backend (native) or
   with only a software adapter, *unsupported*. `FuzzBatchCalls` drives
   arbitrary calls over arbitrary guest memory.
+  **Invalid objects are loud**: WGSL that does not compile (a reserved
+  word such as `meta`, a syntax error), or a layout, pipeline or bind group
+  WebGPU rejects, fails the submit that carries it with errno **11,
+  *invalid shader*** and loses the context; `last_error(ctx, buf, len, out)`
+  (a fifth import) copies the context's last failure message (at most 1 KiB,
+  UTF-8, the browser's WGSL line and column included) to `buf` and stores its
+  full length at `out`. `batchsink.Error.Msg` carries it, so the guest sees
+  `submit: invalid shader or object (the GPU refused it): ... :1:42 error:
+  'meta' is a reserved keyword`. `examples/batchcompute shaders` runs a
+  reserved word, a syntax error and a valid control in a container
+  (e2e); go-gfx/webgpu v0.9.0 does the scoping.
 - **GPU memory**: `wctr run --gpu --gpu-memory=SIZE` (default 256 MiB, at most
   1.5 GiB, refused without `--gpu`; the grant reaches the module as the
   capability `gpu-memory=BYTES`, engine v0.32.0) bounds the buffers and

@@ -13,6 +13,9 @@ func hostContextCreate(out unsafe.Pointer) uint32
 //go:wasmimport wasi_webgpu_batch submit
 func hostSubmit(ctx uint32, frame unsafe.Pointer, frameLen uint32, read unsafe.Pointer, readLen uint32) uint32
 
+//go:wasmimport wasi_webgpu_batch last_error
+func hostLastError(ctx uint32, buf unsafe.Pointer, n uint32, out unsafe.Pointer) uint32
+
 //go:wasmimport wasi_webgpu_batch context_destroy
 func hostContextDestroy(ctx uint32) uint32
 
@@ -38,6 +41,16 @@ func (wasi) Submit(ctx uint32, frame, read []byte) Errno {
 	return Errno(hostSubmit(ctx, ptr(frame), uint32(len(frame)), ptr(read), uint32(len(read))))
 }
 func (wasi) ContextDestroy(ctx uint32) Errno { return Errno(hostContextDestroy(ctx)) }
+
+// LastError implements ErrorReporter.
+func (wasi) LastError(ctx uint32) string {
+	buf := make([]byte, 1024)
+	var n uint32
+	if Errno(hostLastError(ctx, ptr(buf), uint32(len(buf)), unsafe.Pointer(&n))) != Success {
+		return ""
+	}
+	return string(buf[:min(n, uint32(len(buf)))])
+}
 
 // Open creates a context on the container's GPU through the host module
 // wasi_webgpu_batch. It fails with an *Error: Denied without run --gpu,

@@ -88,11 +88,11 @@ func TestNewSinkRefusals(t *testing.T) {
 	if _, err := Open(); !errors.Is(err, ErrUnavailable) {
 		t.Errorf("Open outside wasip1: %v", err)
 	}
-	if !errors.Is(&Error{"submit", Refused}, &Error{Errno: Refused}) || errors.Is(&Error{"submit", Refused}, &Error{Errno: Failed}) ||
-		errors.Is(&Error{"submit", Refused}, errors.New("x")) {
+	if !errors.Is(&Error{Op: "submit", Errno: Refused}, &Error{Errno: Refused}) || errors.Is(&Error{Op: "submit", Errno: Refused}, &Error{Errno: Failed}) ||
+		errors.Is(&Error{Op: "submit", Errno: Refused}, errors.New("x")) {
 		t.Error("Error.Is")
 	}
-	if !strings.Contains((&Error{"x", 99}).Error(), "errno 99") {
+	if !strings.Contains((&Error{Op: "x", Errno: 99}).Error(), "errno 99") {
 		t.Error("unknown errno text")
 	}
 }
@@ -262,5 +262,34 @@ func TestDeviceQuotaFromCaps(t *testing.T) {
 	}
 	if s.Caps().MaxMemory != 1<<20 {
 		t.Error("Caps")
+	}
+}
+
+type reportingHost struct {
+	fakeHost
+	msg string
+}
+
+func (h *reportingHost) Submit(ctx uint32, frame, read []byte) Errno { return InvalidShader }
+func (h *reportingHost) LastError(ctx uint32) string                 { return h.msg }
+
+// A host that can say why gives the error its message.
+func TestInvalidShaderMessage(t *testing.T) {
+	h := &reportingHost{msg: "Error while parsing WGSL: :1:42 error: 'meta' is a reserved keyword"}
+	h.fakeHost = *(func() *fakeHost { _, f := newSink(t); return f })()
+	s, err := NewSink(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := s.Device("t")
+	m, err := d.CreateShaderModule(webgpu.ShaderModuleDescriptor{Code: "x"})
+	_ = m
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.Flush()
+	var e *Error
+	if !errors.As(err, &e) || e.Errno != InvalidShader || !strings.Contains(e.Msg, "reserved keyword") || !strings.Contains(e.Error(), "reserved keyword") {
+		t.Fatalf("%v", err)
 	}
 }

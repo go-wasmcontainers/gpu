@@ -110,6 +110,7 @@ func TestBatchComputeContainers(t *testing.T) {
 		{Name: "batch-refusals", Module: "batchcompute.wasm", Args: []string{"refusals"}, GPU: true},
 		{Name: "batch-quota", Module: "batchcompute.wasm", Args: []string{"quota"}, GPU: true, GPUMemory: 128 << 20},
 		{Name: "batch-grant", Module: "batchcompute.wasm", GPU: true, GPUMemory: 1 << 30},
+		{Name: "batch-shaders", Module: "batchcompute.wasm", Args: []string{"shaders"}, GPU: true},
 	}
 	rep := runBatchCases(t, cases, launchFallbackArgs(), allowFallback())
 	requireGPU(t, rep)
@@ -121,17 +122,22 @@ func TestBatchComputeContainers(t *testing.T) {
 			"max_frame 33554432", "max_memory 268435456"}},
 		"batch-no-gpu": {2, []string{"no GPU: wasi_webgpu_batch: caps: denied"}},
 		"batch-refusals": {0, []string{
-			"out-of-range write: wasi_webgpu_batch: submit: refused (as expected: true)",
-			"read outside the window: wasi_webgpu_batch: submit: refused (as expected: true)",
-			"dispatch above the limit: wasi_webgpu_batch: submit: refused (as expected: true)",
-			"id of another context: wasi_webgpu_batch: submit: refused (as expected: true)",
+			"out-of-range write: wasi_webgpu_batch: submit: refused: replay: range refused",
+			"read outside the window: wasi_webgpu_batch: submit: refused: batch: read-back refused",
+			"dispatch above the limit: wasi_webgpu_batch: submit: refused: replay: range refused",
+			"id of another context: wasi_webgpu_batch: submit: refused: replay: unknown object 77",
 			"bad magic: wasi_webgpu_batch: submit: refused (as expected: true)",
 			"truncated frame: wasi_webgpu_batch: submit: refused (as expected: true)",
 			"frame above max_frame: wasi_webgpu_batch: submit: too large (as expected: true)",
-			"allocation past the quota: wasi_webgpu_batch: submit: quota exceeded (as expected: true)",
+			"allocation past the quota: wasi_webgpu_batch: submit: quota exceeded: webgpu: quota: memory",
 			"8 frames refused"}},
 		"batch-quota": {0, []string{"buffer 0 ok", "buffer 1 ok", "buffer 2 refused"}},
 		"batch-grant": {0, []string{"max_memory 1073741824", "1024 KiB: 262144 elements match the CPU"}},
+		"batch-shaders": {0, []string{
+			"valid control: <nil> (as expected: true)",
+			"reserved word: wasi_webgpu_batch: submit: invalid shader or object (the GPU refused it): batch: the GPU refused the object: Error while parsing WGSL: :1:42 error: 'meta' is a reserved keyword",
+			"syntax error: wasi_webgpu_batch: submit: invalid shader or object (the GPU refused it): batch: the GPU refused the object: Error while parsing WGSL",
+			"3 shader cases as expected"}},
 	}
 	for _, r := range rep.Results {
 		w := want[r.Name]
