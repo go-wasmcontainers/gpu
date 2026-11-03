@@ -125,62 +125,85 @@ const drainWGSL = `
 // fail; nothing says submitted work stops), so after a sanction the host
 // waits for a trivial submit of its own to complete, which it does once the
 // destroyed device's work has left the GPU queue.
+//
+// A browser may refuse the probe while the GPU is still busy: Safari 27.2
+// answers requestAdapter with null for as long as a destroyed device's
+// shader runs (measured: the container started right after a sanction got
+// "no GPU"). A refusal is therefore retried every 100 ms until the timeout:
+// the probe being refused is itself the sign that the GPU has not drained.
 func (b Browser) Drain(timeout time.Duration) error {
 	drainProbe.Lock()
 	defer drainProbe.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	if drainProbe.dev == nil {
-		g, err := wg.Navigator()
-		if err != nil {
+	for {
+		err := b.drainOnce(ctx)
+		if err == nil || ctx.Err() != nil {
 			return err
 		}
-		ad, err := g.RequestAdapter(ctx, &wg.RequestAdapterOptions{AllowFallback: b.AllowFallback})
-		if err != nil {
+		select {
+		case <-ctx.Done():
 			return err
+		case <-time.After(100 * time.Millisecond):
 		}
-		dev, err := ad.RequestDevice(ctx, &wg.DeviceDescriptor{Label: "wasi_webgpu_batch drain"})
-		if err != nil {
-			return err
-		}
-		bgl, err := dev.CreateBindGroupLayout(wg.BindGroupLayoutDescriptor{Entries: []wg.BindGroupLayoutEntry{
-			{Binding: 0, Visibility: wg.ShaderStageCompute, Buffer: &wg.BufferBindingLayout{Type: wg.BufferBindingTypeStorage}}}})
-		if err != nil {
-			return err
-		}
-		pl, err := dev.CreatePipelineLayout(wg.PipelineLayoutDescriptor{BindGroupLayouts: []*wg.BindGroupLayout{bgl}})
-		if err != nil {
-			return err
-		}
-		m, err := dev.CreateShaderModule(wg.ShaderModuleDescriptor{Code: drainWGSL})
-		if err != nil {
-			return err
-		}
-		pipe, err := dev.CreateComputePipeline(wg.ComputePipelineDescriptor{Layout: pl, Compute: wg.ProgrammableStage{Module: m, EntryPoint: "main"}})
-		if err != nil {
-			return err
-		}
-		buf, err := dev.CreateBuffer(wg.BufferDescriptor{Size: 16, Usage: wg.BufferUsageStorage})
-		if err != nil {
-			return err
-		}
-		bg, err := dev.CreateBindGroup(wg.BindGroupDescriptor{Layout: bgl, Entries: []wg.BindGroupEntry{{Binding: 0, Buffer: buf}}})
-		if err != nil {
-			return err
-		}
-		drainProbe.dev, drainProbe.rig = dev, &drainRig{pipe: pipe, bg: bg}
 	}
-	rec := drainProbe.dev.NewRecorder()
-	p := rec.BeginComputePass()
-	p.SetPipeline(drainProbe.rig.pipe)
-	p.SetBindGroup(0, drainProbe.rig.bg)
-	p.DispatchWorkgroups(1, 1, 1)
-	if err := p.End(); err != nil {
-		return err
+}
+
+// drainOnce opens the probe if needed and waits for one trivial submit.
+func (b Browser) drainOnce(ctx context.Context) error {
+	{
+		if drainProbe.dev == nil {
+			g, err := wg.Navigator()
+			if err != nil {
+				return err
+			}
+			ad, err := g.RequestAdapter(ctx, &wg.RequestAdapterOptions{AllowFallback: b.AllowFallback})
+			if err != nil {
+				return err
+			}
+			dev, err := ad.RequestDevice(ctx, &wg.DeviceDescriptor{Label: "wasi_webgpu_batch drain"})
+			if err != nil {
+				return err
+			}
+			bgl, err := dev.CreateBindGroupLayout(wg.BindGroupLayoutDescriptor{Entries: []wg.BindGroupLayoutEntry{
+				{Binding: 0, Visibility: wg.ShaderStageCompute, Buffer: &wg.BufferBindingLayout{Type: wg.BufferBindingTypeStorage}}}})
+			if err != nil {
+				return err
+			}
+			pl, err := dev.CreatePipelineLayout(wg.PipelineLayoutDescriptor{BindGroupLayouts: []*wg.BindGroupLayout{bgl}})
+			if err != nil {
+				return err
+			}
+			m, err := dev.CreateShaderModule(wg.ShaderModuleDescriptor{Code: drainWGSL})
+			if err != nil {
+				return err
+			}
+			pipe, err := dev.CreateComputePipeline(wg.ComputePipelineDescriptor{Layout: pl, Compute: wg.ProgrammableStage{Module: m, EntryPoint: "main"}})
+			if err != nil {
+				return err
+			}
+			buf, err := dev.CreateBuffer(wg.BufferDescriptor{Size: 16, Usage: wg.BufferUsageStorage})
+			if err != nil {
+				return err
+			}
+			bg, err := dev.CreateBindGroup(wg.BindGroupDescriptor{Layout: bgl, Entries: []wg.BindGroupEntry{{Binding: 0, Buffer: buf}}})
+			if err != nil {
+				return err
+			}
+			drainProbe.dev, drainProbe.rig = dev, &drainRig{pipe: pipe, bg: bg}
+		}
+		rec := drainProbe.dev.NewRecorder()
+		p := rec.BeginComputePass()
+		p.SetPipeline(drainProbe.rig.pipe)
+		p.SetBindGroup(0, drainProbe.rig.bg)
+		p.DispatchWorkgroups(1, 1, 1)
+		if err := p.End(); err != nil {
+			return err
+		}
+		seq, err := rec.Submit()
+		if err != nil {
+			return err
+		}
+		return drainProbe.dev.WaitSubmitted(ctx, seq)
 	}
-	seq, err := rec.Submit()
-	if err != nil {
-		return err
-	}
-	return drainProbe.dev.WaitSubmitted(ctx, seq)
 }

@@ -259,7 +259,7 @@ on SwiftShader (labelled fallback: proves the WGSL, not a GPU).
 | Firefox | Windows | since 141 | not run here |
 | Firefox | macOS, Apple silicon | 145 (Tahoe), 147 (older macOS); not Intel | see the row above |
 | Firefox | Linux | not supported (MDN browser-compat-data `api.GPU`, bug 2006676) | none |
-| Safari 27.2 | macOS 27, Apple M4 Max | yes (since 26), adapter reported as vendor `apple`, architecture `apple`, not a fallback; `shader-f16` yes, `subgroups` no here | passes locally through safaridriver (batch module, refusals, quota, 123/123 ONNX cases, MNIST-12 within 3.1e-5, 2 s deadline at 2002 ms) |
+| Safari 27.2 | macOS 27, Apple M4 Max | yes (since 26), adapter reported as vendor `apple`, architecture `apple`, not a fallback; `shader-f16` yes, `subgroups` no here | passes locally through safaridriver (batch module, refusals, quota, 123/123 ONNX cases, MNIST-12 within 3.1e-5; no GPU sanction on legitimate work, longest submit 11.7 ms; **the hostile-shader run does not pass**: WebKit's own watchdog destroys a 3 s shader and then refuses adapters, see docs/gpu-scheduling.md) |
 | Safari 27.2 / 26.6.2 | GitHub macOS runners (`macos-15`, `macos-26`; virtual machines) | no: `macos-15` has no `navigator.gpu`, `macos-26` answers `requestAdapter` with null | no CI lane (the lane fails there; WebKit excludes VMs) |
 
 Per-submit round trip seen from the guest, 30 interleaved rounds each, Apple

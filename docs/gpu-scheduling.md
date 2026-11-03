@@ -164,5 +164,19 @@ its first overrun (the next `context_create` answers *revoked*, asserted),
 and that the stall happens once. Every other batch test, the LLM tests
 (`TestLLMOracle`, `TestLLMTrace`, `TestLLMShaders`) and the existing e2e pass
 with **zero sanctions** on Chromium; the batch tests pass with zero sanctions
-on Firefox. Not measured: Safari (its e2e lane, go-wasmcontainers/gpu#29, has
-not landed).
+on Firefox.
+
+**Safari 27.2 (safaridriver lane, #29): partly validated.** The legitimate
+workloads are never sanctioned (batchcompute, refusals, quota, grant, the
+compute-quota test: longest submit 11.7 ms, zero sanctions). The hostile run
+is not validated, and does not pass `TestBatchDeadline`: WebKit has its own
+watchdog. With the host's budget raised to 60 s, Safari itself destroyed the
+hostile device after 3.25 s of shader ("object destroyed", the host did
+nothing), and every later `requestAdapter` answered null (the next containers
+got *unsupported*). With the default budget, the sanction at 2 s was followed
+by the same refusals, the drain probe was refused too (it retries until
+`DrainTime`), and the next container that did get a device was itself
+sanctioned. The load average was 12 to 19 during those runs, so the timing is
+not clean, but the adapter refusal is. It is tracked as an open defect
+(Safari's behaviour after a hung shader), not claimed as working; the Safari
+victim-latency figure is therefore **not measured**.
