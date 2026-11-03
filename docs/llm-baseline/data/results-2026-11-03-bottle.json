@@ -1,0 +1,578 @@
+[
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 1,
+  "load1": 5.91,
+  "pp_tps": 1246.673306,
+  "tg_tps": 507.377873,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 1,
+  "load1": 5.91,
+  "pp_tps": 410.380764,
+  "tg_tps": 158.070909,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 1,
+  "load1": 6.24,
+  "pp_tps": 18177.193842,
+  "tg_tps": 536.385047,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 1,
+  "load1": 6.24,
+  "pp_tps": 10566.323575,
+  "tg_tps": 432.557865,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 1,
+  "load1": 6.24,
+  "pp_tps": 1147.54509,
+  "tg_tps": 465.699109,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 1,
+  "load1": 6.24,
+  "pp_tps": 395.258138,
+  "tg_tps": 142.273342,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 1,
+  "load1": 6.24,
+  "pp_tps": 17296.811117,
+  "tg_tps": 526.124243,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 1,
+  "load1": 6.24,
+  "pp_tps": 8341.343412,
+  "tg_tps": 435.868085,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 2,
+  "load1": 5.98,
+  "pp_tps": 421.376692,
+  "tg_tps": 152.658851,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 2,
+  "load1": 5.98,
+  "pp_tps": 19033.222341,
+  "tg_tps": 551.651318,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 2,
+  "load1": 5.98,
+  "pp_tps": 7892.586826,
+  "tg_tps": 449.123989,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 2,
+  "load1": 5.98,
+  "pp_tps": 1119.095508,
+  "tg_tps": 405.929637,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 2,
+  "load1": 5.98,
+  "pp_tps": 383.732299,
+  "tg_tps": 126.993702,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 2,
+  "load1": 6.22,
+  "pp_tps": 17842.518862,
+  "tg_tps": 562.134839,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 2,
+  "load1": 6.22,
+  "pp_tps": 8328.002002,
+  "tg_tps": 451.143124,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 2,
+  "load1": 6.22,
+  "pp_tps": 1192.111574,
+  "tg_tps": 504.539211,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 3,
+  "load1": 6.22,
+  "pp_tps": 17843.347122,
+  "tg_tps": 534.888504,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 3,
+  "load1": 6.22,
+  "pp_tps": 9956.150159,
+  "tg_tps": 440.977742,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 3,
+  "load1": 6.22,
+  "pp_tps": 1122.868982,
+  "tg_tps": 462.859377,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 3,
+  "load1": 6.22,
+  "pp_tps": 397.5074,
+  "tg_tps": 138.553336,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 3,
+  "load1": 6.22,
+  "pp_tps": 18455.659269,
+  "tg_tps": 547.012736,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 3,
+  "load1": 5.96,
+  "pp_tps": 8191.86893,
+  "tg_tps": 466.701912,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 3,
+  "load1": 5.96,
+  "pp_tps": 1261.780931,
+  "tg_tps": 514.841753,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 3,
+  "load1": 5.96,
+  "pp_tps": 432.483145,
+  "tg_tps": 159.535544,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 4,
+  "load1": 5.96,
+  "pp_tps": 10645.707929,
+  "tg_tps": 438.560552,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 4,
+  "load1": 5.96,
+  "pp_tps": 1139.779139,
+  "tg_tps": 464.11452,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 4,
+  "load1": 5.96,
+  "pp_tps": 400.507726,
+  "tg_tps": 142.334561,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 4,
+  "load1": 5.56,
+  "pp_tps": 18045.43163,
+  "tg_tps": 522.021418,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 4,
+  "load1": 5.56,
+  "pp_tps": 9669.164988,
+  "tg_tps": 381.520024,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 4,
+  "load1": 5.56,
+  "pp_tps": 1245.872949,
+  "tg_tps": 513.034878,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 4,
+  "load1": 5.56,
+  "pp_tps": 431.978624,
+  "tg_tps": 159.282218,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 4,
+  "load1": 5.56,
+  "pp_tps": 16567.880678,
+  "tg_tps": 524.483851,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 5,
+  "load1": 5.56,
+  "pp_tps": 1141.252257,
+  "tg_tps": 463.456207,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 5,
+  "load1": 5.56,
+  "pp_tps": 399.292659,
+  "tg_tps": 137.854686,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 5,
+  "load1": 5.28,
+  "pp_tps": 21125.741237,
+  "tg_tps": 531.009706,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 5,
+  "load1": 5.28,
+  "pp_tps": 10094.106249,
+  "tg_tps": 445.195197,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 5,
+  "load1": 5.28,
+  "pp_tps": 1243.996164,
+  "tg_tps": 419.939584,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 5,
+  "load1": 5.28,
+  "pp_tps": 423.750791,
+  "tg_tps": 156.87597,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 5,
+  "load1": 5.28,
+  "pp_tps": 18020.87183,
+  "tg_tps": 548.033182,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 5,
+  "load1": 5.26,
+  "pp_tps": 9974.187893,
+  "tg_tps": 442.193556,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 6,
+  "load1": 5.26,
+  "pp_tps": 396.707278,
+  "tg_tps": 136.364665,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 6,
+  "load1": 5.26,
+  "pp_tps": 17976.15968,
+  "tg_tps": 341.55356,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 6,
+  "load1": 5.26,
+  "pp_tps": 10473.131916,
+  "tg_tps": 448.444633,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 6,
+  "load1": 5.26,
+  "pp_tps": 1246.847874,
+  "tg_tps": 517.877738,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 6,
+  "load1": 5.26,
+  "pp_tps": 430.804001,
+  "tg_tps": 160.539815,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 6,
+  "load1": 5.08,
+  "pp_tps": 17229.582709,
+  "tg_tps": 555.836207,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 6,
+  "load1": 5.08,
+  "pp_tps": 7866.313477,
+  "tg_tps": 468.910773,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 6,
+  "load1": 5.08,
+  "pp_tps": 1131.203804,
+  "tg_tps": 462.898852,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 7,
+  "load1": 5.08,
+  "pp_tps": 18624.615776,
+  "tg_tps": 571.387225,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 7,
+  "load1": 5.08,
+  "pp_tps": 7976.568829,
+  "tg_tps": 453.035938,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 7,
+  "load1": 5.08,
+  "pp_tps": 1275.014159,
+  "tg_tps": 524.593658,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 7,
+  "load1": 5.08,
+  "pp_tps": 410.398362,
+  "tg_tps": 157.776672,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 7,
+  "load1": 5.15,
+  "pp_tps": 18853.217685,
+  "tg_tps": 546.077706,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 7,
+  "load1": 5.15,
+  "pp_tps": 7548.356808,
+  "tg_tps": 386.027368,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 7,
+  "load1": 5.15,
+  "pp_tps": 1077.213638,
+  "tg_tps": 412.54563,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 7,
+  "load1": 5.15,
+  "pp_tps": 387.716358,
+  "tg_tps": 131.72734,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 8,
+  "load1": 5.15,
+  "pp_tps": 10497.073326,
+  "tg_tps": 468.329664,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 8,
+  "load1": 5.15,
+  "pp_tps": 1255.845901,
+  "tg_tps": 488.326578,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [bottle]",
+  "round": 8,
+  "load1": 4.98,
+  "pp_tps": 427.269533,
+  "tg_tps": 156.455445,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 8,
+  "load1": 4.98,
+  "pp_tps": 19163.349137,
+  "tg_tps": 549.470598,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context) [bottle]",
+  "round": 8,
+  "load1": 4.98,
+  "pp_tps": 7487.149449,
+  "tg_tps": 434.684052,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 8,
+  "load1": 4.98,
+  "pp_tps": 1049.543074,
+  "tg_tps": 443.575838,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1 [hand]",
+  "round": 8,
+  "load1": 4.98,
+  "pp_tps": 388.507021,
+  "tg_tps": 138.395086,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ },
+ {
+  "config": "SmolLM2-135M llama.cpp Q4_0 Metal (context) [hand]",
+  "round": 8,
+  "load1": 4.98,
+  "pp_tps": 21328.001333,
+  "tg_tps": 540.684674,
+  "pp_tokens": 128,
+  "tg_tokens": 128
+ }
+]

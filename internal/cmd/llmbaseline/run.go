@@ -20,6 +20,7 @@ type Config struct {
 	Name string
 	Kind string // "llamacpp-cpu", "llamacpp-metal" or "webllm"
 	GGUF string // path of the GGUF file (llama.cpp kinds)
+	Bin  string // llama-bench binary (llama.cpp kinds)
 	// WebLLM: model id (a directory under <corpus>/mlc-ai/), model library
 	// file under <corpus>/libs/, and whether the library needs shader-f16.
 	MLCID, Lib string
@@ -28,24 +29,24 @@ type Config struct {
 
 // Env is everything a round needs.
 type Env struct {
-	Corpus      string
-	BenchCPU    string // llama-bench built without Metal and BLAS
-	BenchMetal  string
-	PP, TG      int
-	MaxLoad     float64
-	MaxRedo     int
-	Wait        time.Duration
-	Channel     string // Playwright channel for the browser ("chromium")
-	Out         io.Writer
-	loadFn      func(context.Context) (float64, error)
-	sleep       func(time.Duration)
-	runLlama    func(ctx context.Context, e *Env, c Config) (Sample, error)
-	runWebLLM   func(ctx context.Context, e *Env, c Config) (Sample, error)
-	execOutput  func(ctx context.Context, name string, args ...string) ([]byte, error)
-	prompt      string
-	srvAddr     string
-	pw          *playwright.Playwright
-	browserInfo string
+	Corpus     string
+	PP, TG     int
+	MaxLoad    float64
+	MaxRedo    int
+	Wait       time.Duration
+	Channel    string // Playwright channel for the browser ("chromium")
+	Out        io.Writer
+	loadFn     func(context.Context) (float64, error)
+	sleep      func(time.Duration)
+	runLlama   func(ctx context.Context, e *Env, c Config) (Sample, error)
+	runWebLLM  func(ctx context.Context, e *Env, c Config) (Sample, error)
+	execOutput func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// execOutputBoth returns stdout and stderr together (llama.cpp logs to stderr).
+	execOutputBoth func(ctx context.Context, name string, args ...string) ([]byte, error)
+	prompt         string
+	srvAddr        string
+	pw             *playwright.Playwright
+	browserInfo    string
 }
 
 func defaultExec(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -55,6 +56,10 @@ func defaultExec(ctx context.Context, name string, args ...string) ([]byte, erro
 	c.Stderr = os.Stderr
 	err := c.Run()
 	return []byte(out.String()), err
+}
+
+func defaultExecBoth(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
 // Interleave runs rounds: in each round every configuration once, the
@@ -100,17 +105,55 @@ func Interleave(ctx context.Context, e *Env, configs []Config, rounds int) ([]Sa
 }
 
 func llamaRun(ctx context.Context, e *Env, c Config) (Sample, error) {
-	bin, ngl, threads := e.BenchCPU, "0", "1"
-	if c.Kind == "llamacpp-metal" {
-		bin, ngl = e.BenchMetal, "99"
-	}
-	out, err := e.execOutput(ctx, bin, "-m", c.GGUF, "-t", threads, "-ngl", ngl,
-		"-p", fmt.Sprint(e.PP), "-n", fmt.Sprint(e.TG), "-r", "1", "-o", "json")
+	out, err := e.execOutput(ctx, c.Bin, benchArgs(c, e.PP, e.TG)...)
 	if err != nil {
 		return Sample{}, err
 	}
 	pp, ppN, tg, tgN, err := ParseBench(out)
 	return Sample{PP: pp, TG: tg, PPToks: ppN, TGToks: tgN}, err
+}
+
+// benchArgs: the CPU rows run one thread with no layer offloaded and, where
+// the binary has the option, no device at all and no op offload, so neither
+// Metal nor BLAS can take work; the Metal rows offload every layer.
+func benchArgs(c Config, pp, tg int) []string {
+	a := []string{"-m", c.GGUF, "-t", "1"}
+	if c.Kind == "llamacpp-metal" {
+		a = append(a, "-ngl", "99")
+	} else {
+		a = append(a, "-ngl", "0", "-dev", "none", "-nopo", "1")
+	}
+	return append(a, "-p", fmt.Sprint(pp), "-n", fmt.Sprint(tg), "-r", "1", "-o", "json")
+}
+
+// VerifyCPU runs one tiny verbose bench and refuses a CPU row on which any
+// layer was offloaded or a GPU buffer was allocated, reading llama.cpp's own log.
+func VerifyCPU(ctx context.Context, e *Env, c Config) error {
+	a := []string{"-m", c.GGUF, "-t", "1", "-ngl", "0", "-dev", "none", "-nopo", "1", "-p", "8", "-n", "1", "-r", "1", "-v", "-o", "json"}
+	out, err := e.execOutputBoth(ctx, c.Bin, a...)
+	if err != nil {
+		return err
+	}
+	return CheckNoGPU(string(out))
+}
+
+// CheckNoGPU reads the model-load log of a CPU run.
+func CheckNoGPU(log string) error {
+	switch {
+	case strings.Contains(log, "offloaded 0/"):
+	case strings.Contains(log, "offloaded "):
+		return fmt.Errorf("log says layers were offloaded")
+	case strings.Contains(log, "CPU_Mapped model buffer"):
+		// A build without any GPU backend prints no "offloaded" line.
+	default:
+		return fmt.Errorf("log says neither that 0 layers were offloaded nor that the model sits in a CPU buffer")
+	}
+	for _, bad := range []string{"MTL0_Mapped", "MTL0 model buffer", "Metal_Mapped", "offloading output layer to GPU"} {
+		if strings.Contains(log, bad) {
+			return fmt.Errorf("log shows a GPU buffer: %q", bad)
+		}
+	}
+	return nil
 }
 
 // serve exposes the corpus to the page: the WebLLM bundle, the model libraries
