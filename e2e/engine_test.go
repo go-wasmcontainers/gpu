@@ -131,8 +131,8 @@ func build(t *testing.T, root, out, pkg, goos string) {
 // examples/mnist (wasi-nn on the CPU and on the GPU), with and without the
 // gpu capability.
 func TestContainersOnWebGPU(t *testing.T) {
-	if browserName() == "firefox" {
-		t.Skip("surfaces and late-message checks drive the page through Playwright; the Firefox lane covers the batch module and the ONNX tests")
+	if browserName() != "chromium" {
+		t.Skip("surfaces and late-message checks drive the page through Playwright (Chromium); the Firefox and Safari lanes cover the batch module and the ONNX tests")
 	}
 	root, err := filepath.Abs("..")
 	if err != nil {

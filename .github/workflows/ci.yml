@@ -198,6 +198,12 @@ jobs:
           cat "$RUNNER_TEMP/e2e.log"
           exit $status
 
+  # There is no Safari lane: probed on PR 29, the GitHub macOS images' Safari
+  # offers no WebGPU (they are virtual machines, which WebKit excludes), see
+  # the README's browser support table. Run it locally:
+  # GPU_E2E_BROWSER=safari go test -tags e2e ./e2e/ (after
+  # `sudo safaridriver --enable`).
+
   cross:
     name: cross ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest

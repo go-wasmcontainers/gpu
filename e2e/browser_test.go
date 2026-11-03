@@ -70,8 +70,11 @@ func serve(t *testing.T, h http.Handler) (port int, reports <-chan string) {
 func fetchReport(t *testing.T, port int, reports <-chan string, query string, launch []string, timeout time.Duration) (report, version string) {
 	t.Helper()
 	url := fmt.Sprintf("http://localhost:%d/index.html%s", port, query)
-	if browserName() == "firefox" {
+	switch browserName() {
+	case "firefox":
 		return runFirefox(t, url, reports, timeout)
+	case "safari":
+		return runSafari(t, url, reports, timeout)
 	}
 	pw, err := playwright.Run()
 	if err != nil {
