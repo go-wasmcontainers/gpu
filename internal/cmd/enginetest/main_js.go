@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"sync"
 	"syscall/js"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/go-wasmcontainers/engine/runtime"
 	"github.com/go-wasmcontainers/engine/runtime/browser"
 	"github.com/go-wasmcontainers/engine/wasi"
+	"github.com/go-wasmcontainers/gpu/gpubatch"
 	"github.com/go-wasmcontainers/gpu/nn"
 	nnwebgpu "github.com/go-wasmcontainers/gpu/nn/webgpu"
 	"github.com/go-wasmcontainers/gpu/onnx"
@@ -38,6 +40,8 @@ type Case struct {
 	Module string   `json:"module"`
 	Args   []string `json:"args"`
 	GPU    bool     `json:"gpu"`
+	// GPUMemory is run --gpu-memory in bytes (0: none, the default quota).
+	GPUMemory int64 `json:"gpuMemory"`
 }
 
 // Result is how it ended.
@@ -164,7 +168,7 @@ func main() {
 	mods := webgpu.HostModules(webgpu.Browser{AllowFallback: allow, OnSurface: onSurface})
 	exec := browser.New(browser.Options{
 		WorkerURL:   "container-worker.js",
-		HostModules: append(mods, wasi.HostModule(nnMod)),
+		HostModules: append(append(mods, wasi.HostModule(nnMod)), gpubatch.HostModules(gpubatch.Browser{AllowFallback: allow})...),
 	})
 	for _, c := range cases {
 		r := Result{Name: c.Name}
@@ -182,6 +186,9 @@ func main() {
 			MemoryLimitBytes: 512 << 20, Timeout: 2 * time.Minute}
 		if c.GPU {
 			spec.Caps = []string{"gpu"}
+			if c.GPUMemory > 0 {
+				spec.Caps = append(spec.Caps, "gpu-memory="+strconv.FormatInt(c.GPUMemory, 10))
+			}
 		}
 		t0 := time.Now()
 		p, err := exec.Start(context.Background(), spec)

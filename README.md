@@ -21,6 +21,7 @@ Design and references: [docs/DESIGN.md](docs/DESIGN.md).
 | `wit`, `webgpu`, `wasigpu`: wasi:webgpu compute (host and Go guest), `examples/compute` | **done** (v0.4.0) — see below |
 | rendering: `wasi-gfx:surface` + `surface-webgpu`, frames to the page, `examples/triangle` | **done** (v0.5.0) — see below; the dashboard pane is the dashboard's part |
 | surface input: pointer and key streams (`stream<…>` and the Canonical ABI's stream and waitable-set built-ins) | **done** — see below; forwarding events from the pane is the dashboard's part |
+| `gpubatch`, `wasigpu/batchsink`: the batched command stream (`wasi_webgpu_batch`, one host call per submit, read-back, `--gpu-memory`), `examples/batchcompute` | **done** — see below |
 | `on-resize` / `on-frame` streams, vertex buffers, depth-stencil | not yet |
 
 ## wasi:webgpu: `wit`, `webgpu` (host), `wasigpu` (guest)
@@ -60,6 +61,65 @@ element matches; matmul 15 ms on the GPU vs 42 ms on the guest's CPU, the
 vector add 69 ms vs 3.5 ms (dominated by transfers; one run, not a
 benchmark). Without `--gpu` the guest is told there is no adapter, and a
 fifth 64 MiB buffer traps on the memory quota.
+
+## Batched GPU commands: `gpubatch` (host) and `wasigpu/batchsink` (guest)
+
+`wasi:webgpu` costs one host call per WebGPU call. The batched path costs
+**one host call per submit**: a guest records go-gfx/webgpu work with a remote
+device, the sink packs creations, destructions and the recorded stream into a
+[go-virtio/gpu `wgpubatch`](https://github.com/go-virtio/gpu) frame, and the
+host replays it on one WebGPU device per container, then fills the read window
+(`Recorder.ReadBuffer`) before returning. The design and the plan are in
+[docs/llm-design.md](docs/llm-design.md) (small language models inside a
+container); this is its blocks M3 to M6.
+
+- **Host module** `wasi_webgpu_batch`, `gpubatch.HostModules(gpubatch.Browser{})`:
+  `caps(buf, len)` writes the capset (version 2: stream version, `max_frame`
+  32 MiB, `max_objects` 4096, the GPU memory grant, `shader-f16` and
+  `subgroups` when the adapter has them, the device limits),
+  `context_create(out)` (at most 4 contexts, one device per container),
+  `submit(ctx, frame, frame_len, read, read_len)` and `context_destroy(ctx)`,
+  each answering an errno. The frame is copied out of guest memory before it
+  is decoded; guest ids are private to the context and remapped
+  (`go-gfx/webgpu/batch`); descriptors, streams and the buffer ranges
+  (`wire.CheckRanges`: writes, copies, indirect arguments, dispatch sizes) are
+  checked **before** WebGPU sees anything; a refused frame loses its context
+  and releases what it held; the guest memory is written only inside the
+  `read` window; a submit not done after 2 s destroys the device. Without
+  `--gpu` every function answers *denied*; without a GPU backend (native) or
+  with only a software adapter, *unsupported*. `FuzzBatchCalls` drives
+  arbitrary calls over arbitrary guest memory.
+- **GPU memory**: `wctr run --gpu --gpu-memory=SIZE` (default 256 MiB, at most
+  1.5 GiB, refused without `--gpu`; the grant reaches the module as the
+  capability `gpu-memory=BYTES`, engine v0.32.0) bounds the buffers and
+  textures of all the container's contexts together.
+- **Guest side**, `wasigpu/batchsink` (`GOOS=wasip1`):
+  `s, _ := batchsink.Open(); dev := s.Device("name")` is a `webgpu.Device`
+  whose submits cross once. Elsewhere `Open` returns `ErrUnavailable`. It
+  lives here, not in [`llm`](https://github.com/go-wasmcontainers/llm), because
+  it is the guest half of this repository's host module (one ABI, versioned
+  and released together, tested against it) and any Go guest can use it;
+  `llm` (the inference code) imports it.
+
+[`examples/batchcompute`](examples/batchcompute) records a compute shader that
+writes known values, copies them to a `MAP_READ` buffer and reads 1 MiB and
+4 KiB back in one crossing each; `e2e/batch_test.go` runs it as **real
+containers in the engine's browser executor** (Chromium on the Apple GPU, no
+fallback adapter): every element matches. The same run checks the refusals:
+no `--gpu`; an out-of-range write, a read outside the window, a dispatch
+above the limit, an id of another context, a bad-magic frame, a truncated
+frame (all *refused*), a frame above `max_frame` (*too large*), a buffer past
+the quota (*quota exceeded*); a smaller `--gpu-memory`; and a forced
+software adapter (*unsupported*).
+
+**Cost of the guest crossing** (`e2e/batch_test.go` `TestBatchRoundTrip`,
+Apple M4 Max, Chromium on Metal, 1-minute load 6.4 to 7.3, medians of 30
+interleaved rounds, three runs): a read-back submit takes 315 to 375 µs at
+4 KiB and 895 to 1 105 µs at 1 MiB from the guest, against 124 and 155 µs
+host-only (go-gfx/webgpu `docs/readback.md`); compute pass + copy + read takes
+735 to 800 µs and 1 160 to 1 380 µs, against 270 and 320 µs. The crossing adds
+about 200 µs at 4 KiB and 750 to 950 µs at 1 MiB (the window and frame copies);
+one crossing per submit is asserted (120 crossings for 120 submits).
 
 ## Rendering: surfaces
 
