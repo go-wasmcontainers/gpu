@@ -26,6 +26,15 @@ type engineCase struct {
 	GPU    bool     `json:"gpu"`
 	// GPUMemory is run --gpu-memory in bytes.
 	GPUMemory int64 `json:"gpuMemory,omitempty"`
+	// Models are mounted read-only at /models (see enginetest).
+	Models []engineModel `json:"models,omitempty"`
+}
+
+type engineModel struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
 }
 
 type engineReport struct {

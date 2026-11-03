@@ -121,6 +121,24 @@ host-only (go-gfx/webgpu `docs/readback.md`); compute pass + copy + read takes
 about 200 µs at 4 KiB and 750 to 950 µs at 1 MiB (the window and frame copies);
 one crossing per submit is asserted (120 crossings for 120 submits).
 
+### An LLM in a container
+
+[go-wasmcontainers/llm](https://github.com/go-wasmcontainers/llm) runs
+SmolLM2-135M (Q4_0) in a container over this module: weights from a
+read-only `/models` mount (engine v0.33.0, `wctr run --model`), kernels in
+f32 WGSL, one submit per token. The browser tests are here
+(`LLM_MODELS=DIR LLM_REPO=CLONE go test -tags e2e ./e2e -run TestLLM`, they
+skip without both): `TestLLMOracle` (GPU tokens against llama.cpp's, GPU
+logits against the Go CPU path), `TestLLMShaders` (every kernel compiled in
+the browser), `TestLLMBench` (interleaved with `llama-bench -t 1`, load at
+most 8). Measured on the Apple M4 Max in Chromium: decode 171 tok/s and
+prefill 311 tok/s, against 529 and 1286 for llama.cpp on one core (open
+defect, in `docs/llm-design.md`). Firefox is a known-slow target for a
+token-per-submit loop (about 200 ms per submit, gpu#25: about 5 tok/s); it
+has not been measured with this container. An invalid WGSL source is not
+reported by `CreateShaderModule` through `wasi_webgpu_batch`: validate
+kernels with `TestLLMShaders`.
+
 ## Rendering: surfaces
 
 `webgpu.HostModules(backend)` serves four modules sharing one handle table

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	wg "github.com/go-gfx/webgpu"
+	"github.com/go-wasmcontainers/engine/models"
 	"github.com/go-wasmcontainers/engine/rootfs"
 	"github.com/go-wasmcontainers/engine/runtime"
 	"github.com/go-wasmcontainers/engine/runtime/browser"
@@ -42,6 +43,18 @@ type Case struct {
 	GPU    bool     `json:"gpu"`
 	// GPUMemory is run --gpu-memory in bytes (0: none, the default quota).
 	GPUMemory int64 `json:"gpuMemory"`
+	// Models are mounted read-only at /models (the engine's model mount,
+	// models.Mount): each is fetched by ranges from URL (same origin), its
+	// size and sha256 verified before the container starts.
+	Models []ModelRef `json:"models"`
+}
+
+// ModelRef is a model of a case.
+type ModelRef struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
 }
 
 // Result is how it ended.
@@ -187,7 +200,17 @@ func main() {
 		fsys.MkdirAll("/bin", 0o755)
 		fsys.WriteFile("/bin/guest.wasm", wasm, 0o755)
 		var so, se buf
-		spec := runtime.Spec{ID: "c-" + c.Name, FS: fsys, Path: "/bin/guest.wasm", Args: append([]string{c.Name}, c.Args...), Stdout: &so, Stderr: &se,
+		var mounts []runtime.Mount
+		if len(c.Models) > 0 {
+			mfs, err := modelMount(c.Models)
+			if err != nil {
+				r.Error = err.Error()
+				rep.Results = append(rep.Results, r)
+				continue
+			}
+			mounts = append(mounts, runtime.Mount{Path: "/models", FS: mfs, ReadOnly: true})
+		}
+		spec := runtime.Spec{ID: "c-" + c.Name, FS: fsys, Path: "/bin/guest.wasm", Args: append([]string{c.Name}, c.Args...), Stdout: &so, Stderr: &se, Mounts: mounts,
 			MemoryLimitBytes: 512 << 20, Timeout: 2 * time.Minute}
 		if c.GPU {
 			spec.Caps = []string{"gpu"}
@@ -212,4 +235,26 @@ func main() {
 	}
 	rep.ConfiguredSurfaces = webgpu.ConfiguredSurfaces()
 	post()
+}
+
+// modelMount verifies the models of a case and returns the tree mounted at
+// /models: the size and sha256 are checked before the container exists.
+func modelMount(refs []ModelRef) (*rootfs.FS, error) {
+	host := js.Global().Get("location").Get("hostname").String()
+	srcs := map[string]models.Source{}
+	var es []models.Entry
+	for _, m := range refs {
+		e := models.Entry{Name: m.Name, Repo: "test/model", Revision: "0000000000000000000000000000000000000000", File: m.Name + ".gguf", Size: m.Size, SHA256: m.SHA256}
+		// Fetched by ranges into the origin's OPFS cache, verified whole,
+		// then read synchronously by the guest (models.OpenOPFS).
+		src, err := models.OpenOPFS(context.Background(), e, func() (models.Source, error) {
+			return models.NewHTTPSource(m.URL, m.Size, []string{host}, nil)
+		})
+		if err != nil {
+			return nil, err
+		}
+		srcs[m.Name] = src
+		es = append(es, e)
+	}
+	return models.Mount(srcs, es)
 }
