@@ -97,10 +97,13 @@ func main() {
 	must(err)
 	bg, err := d.CreateBindGroup(webgpu.BindGroupDescriptor{Layout: bgl, Entries: []webgpu.BindGroupEntry{{Binding: 0, Buffer: buf}}})
 	must(err)
-	r := &rig{d: d, bgl: bgl, pl: pl, bg: bg, gx: c.Device.MaxComputeWorkgroupsPerDimension, gy: 16}
+	r := &rig{d: d, bgl: bgl, pl: pl, bg: bg, gx: 1, gy: 1}
+	maxX := c.Device.MaxComputeWorkgroupsPerDimension
 
-	// Calibrate: double the loop until one submit takes 250 ms (well under
-	// the 2 s deadline), then scale to the target.
+	// Calibrate: double the work (X workgroups up to the device limit, then
+	// 16 in Y, then the loop) until one submit takes 250 ms, well under the
+	// 2 s deadline even on a software adapter, then scale the loop to the
+	// target.
 	iters := uint64(1 << 10)
 	var took time.Duration
 	for {
@@ -109,9 +112,19 @@ func main() {
 		if took >= 250*time.Millisecond || iters >= 1<<31 {
 			break
 		}
-		iters *= 2
+		switch {
+		case r.gx < maxX:
+			r.gx = min(r.gx*2, maxX)
+		case r.gy < 16:
+			r.gy *= 2
+		default:
+			iters *= 2
+		}
 	}
 	iters = uint64(float64(iters) * target / float64(took.Milliseconds()+1))
+	if iters == 0 {
+		iters = 1
+	}
 	if iters > 1<<32-1 {
 		iters = 1<<32 - 1
 	}

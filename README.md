@@ -218,6 +218,7 @@ on SwiftShader (labelled fallback: proves the WGSL, not a GPU).
 |---|---|---|---|
 | Chromium 151 | macOS, Apple M4 Max (Metal) | yes | passes (123/123 ONNX cases) |
 | Firefox 159 | macOS 27, Apple M4 Max | yes in a normal window; `--headless` answers `requestAdapter` with null | passes, **headed** (123/123, MNIST-12 within 3.1e-5, 2 s deadline at 2000 ms) |
+| Firefox 158.0.1 | macOS runner (GitHub Actions, `macos-latest`), headed | yes (adapter not nameable; `isFallbackAdapter` false) | passes in CI (batch module, 123/123 ONNX cases, 2 s deadline) |
 | Firefox | Windows | since 141 | not run here |
 | Firefox | macOS, Apple silicon | 145 (Tahoe), 147 (older macOS); not Intel | see the row above |
 | Firefox | Linux | not supported (MDN browser-compat-data `api.GPU`, bug 2006676) | none |
