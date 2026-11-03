@@ -175,8 +175,60 @@ func TestRootCmdRefusesFewRounds(t *testing.T) {
 	var out bytes.Buffer
 	c.SetOut(&out)
 	c.SetErr(&out)
-	c.SetArgs([]string{"run", "--corpus", "x", "--bench-cpu", "x", "--bench-metal", "x", "--smollm2", "x", "--qwen", "x", "--out", "x", "--rounds", "3"})
+	c.SetArgs([]string{"run", "--corpus", "x", "--smollm2", "x", "--qwen", "x", "--out", "x", "--rounds", "3"})
 	if err := c.Execute(); err == nil || !strings.Contains(err.Error(), "at least 5") {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestConfigsDefaultToTheBottle(t *testing.T) {
+	cs := configs("c", "s.gguf", "q.gguf", "/bottle/llama-bench", "", "", false)
+	if len(cs) != 4 {
+		t.Fatalf("%d rows without a hand build and without WebLLM", len(cs))
+	}
+	for _, c := range cs {
+		if c.Bin != "/bottle/llama-bench" || !strings.HasSuffix(c.Name, "[bottle]") {
+			t.Errorf("%+v", c)
+		}
+	}
+	cs = configs("c", "s.gguf", "q.gguf", "/bottle/llama-bench", "/hand/cpu", "/hand/metal", false)
+	hand := 0
+	for _, c := range cs {
+		if strings.HasSuffix(c.Name, "[hand]") {
+			hand++
+			if c.Bin == "/bottle/llama-bench" {
+				t.Error("a hand row runs the bottle")
+			}
+		}
+	}
+	if hand != 4 {
+		t.Errorf("%d hand rows", hand)
+	}
+}
+
+func TestBenchArgs(t *testing.T) {
+	cpu := strings.Join(benchArgs(Config{Kind: "llamacpp-cpu", GGUF: "m"}, 128, 128), " ")
+	for _, want := range []string{"-t 1", "-ngl 0", "-dev none", "-nopo 1", "-p 128", "-n 128"} {
+		if !strings.Contains(cpu, want) {
+			t.Errorf("cpu args %q lack %q", cpu, want)
+		}
+	}
+	if m := strings.Join(benchArgs(Config{Kind: "llamacpp-metal", GGUF: "m"}, 128, 128), " "); !strings.Contains(m, "-ngl 99") || strings.Contains(m, "-dev none") {
+		t.Errorf("metal args %q", m)
+	}
+}
+
+func TestCheckNoGPU(t *testing.T) {
+	ok := "load_tensors: offloaded 0/25 layers to GPU\nload_tensors:   CPU_Mapped model buffer size = 73 MiB"
+	if err := CheckNoGPU(ok); err != nil {
+		t.Error(err)
+	}
+	if err := CheckNoGPU("load_tensors:   CPU_Mapped model buffer size = 73 MiB"); err != nil {
+		t.Errorf("a build without a GPU backend: %v", err)
+	}
+	for _, bad := range []string{"load_tensors: offloaded 25/25 layers to GPU", ok + "\nload_tensors:   MTL0_Mapped model buffer size = 1 MiB", "nothing"} {
+		if CheckNoGPU(bad) == nil {
+			t.Errorf("accepted %q", bad)
+		}
 	}
 }

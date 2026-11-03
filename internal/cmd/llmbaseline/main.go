@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -78,20 +79,38 @@ func urlCmd() *cobra.Command {
 // configs is the table's rows. The llama.cpp rows take the GGUF files, the
 // WebLLM rows the MLC builds; SmolLM2-135M has MLC q4f16_1 and q4f32_1 builds
 // outside WebLLM's prebuilt list, run here with their published libraries.
-func configs(corpus, smolGGUF, qwenGGUF, libVer string) []Config {
-	_ = libVer
+//
+// The llama.cpp rows run the go-pkgx bottle (bottle) by default. A hand build
+// is only ever an explicit comparison input (handCPU, handMetal): its rows are
+// added, labelled "[hand]", and never replace the bottle's.
+func configs(corpus, smolGGUF, qwenGGUF, bottle, handCPU, handMetal string, webllm bool) []Config {
 	sm := filepath.Join(corpus, smolGGUF)
 	qw := filepath.Join(corpus, qwenGGUF)
-	return []Config{
-		{Name: "SmolLM2-135M llama.cpp Q4_0 CPU -t 1", Kind: "llamacpp-cpu", GGUF: sm},
-		{Name: "Qwen2.5-0.5B llama.cpp Q4_0 CPU -t 1", Kind: "llamacpp-cpu", GGUF: qw},
-		{Name: "SmolLM2-135M WebLLM q4f16_1", Kind: "webllm", MLCID: "SmolLM2-135M-Instruct-q4f16_1-MLC", Lib: "SmolLM2-135M-Instruct-q4f16_1_cs1k-webgpu.wasm", F16: true},
-		{Name: "SmolLM2-135M WebLLM q4f32_1", Kind: "webllm", MLCID: "SmolLM2-135M-Instruct-q4f32_1-MLC", Lib: "SmolLM2-135M-Instruct-q4f32_1_cs1k-webgpu.wasm"},
-		{Name: "Qwen2.5-0.5B WebLLM q4f16_1", Kind: "webllm", MLCID: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC", Lib: "Qwen2-0.5B-Instruct-q4f16_1_cs1k-webgpu.wasm", F16: true},
-		{Name: "Qwen2.5-0.5B WebLLM q4f32_1", Kind: "webllm", MLCID: "Qwen2.5-0.5B-Instruct-q4f32_1-MLC", Lib: "Qwen2-0.5B-Instruct-q4f32_1_cs1k-webgpu.wasm"},
-		{Name: "SmolLM2-135M llama.cpp Q4_0 Metal (context)", Kind: "llamacpp-metal", GGUF: sm},
-		{Name: "Qwen2.5-0.5B llama.cpp Q4_0 Metal (context)", Kind: "llamacpp-metal", GGUF: qw},
+	models := []struct{ name, gguf string }{{"SmolLM2-135M", sm}, {"Qwen2.5-0.5B", qw}}
+	var out []Config
+	add := func(label, cpu, metal string) {
+		if cpu == "" {
+			return
+		}
+		for _, m := range models {
+			out = append(out, Config{Name: m.name + " llama.cpp Q4_0 CPU -t 1 " + label, Kind: "llamacpp-cpu", GGUF: m.gguf, Bin: cpu})
+		}
+		for _, m := range models {
+			out = append(out, Config{Name: m.name + " llama.cpp Q4_0 Metal (context) " + label, Kind: "llamacpp-metal", GGUF: m.gguf, Bin: metal})
+		}
 	}
+	add("[bottle]", bottle, bottle)
+	if handCPU != "" && handMetal != "" {
+		add("[hand]", handCPU, handMetal)
+	}
+	if webllm {
+		out = append(out,
+			Config{Name: "SmolLM2-135M WebLLM q4f16_1", Kind: "webllm", MLCID: "SmolLM2-135M-Instruct-q4f16_1-MLC", Lib: "SmolLM2-135M-Instruct-q4f16_1_cs1k-webgpu.wasm", F16: true},
+			Config{Name: "SmolLM2-135M WebLLM q4f32_1", Kind: "webllm", MLCID: "SmolLM2-135M-Instruct-q4f32_1-MLC", Lib: "SmolLM2-135M-Instruct-q4f32_1_cs1k-webgpu.wasm"},
+			Config{Name: "Qwen2.5-0.5B WebLLM q4f16_1", Kind: "webllm", MLCID: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC", Lib: "Qwen2-0.5B-Instruct-q4f16_1_cs1k-webgpu.wasm", F16: true},
+			Config{Name: "Qwen2.5-0.5B WebLLM q4f32_1", Kind: "webllm", MLCID: "Qwen2.5-0.5B-Instruct-q4f32_1-MLC", Lib: "Qwen2-0.5B-Instruct-q4f32_1_cs1k-webgpu.wasm"})
+	}
+	return out
 }
 
 func uptimeLoad(ctx context.Context, exec func(context.Context, string, ...string) ([]byte, error)) (float64, error) {
@@ -104,10 +123,11 @@ func uptimeLoad(ctx context.Context, exec func(context.Context, string, ...strin
 
 func runCmd() *cobra.Command {
 	var (
-		corpus, benchCPU, benchMetal, smol, qwen, out, only string
-		rounds, pp, tg                                      int
-		maxLoad                                             float64
-		wait                                                time.Duration
+		corpus, bench, handCPU, handMetal, smol, qwen, out, only string
+		rounds, pp, tg                                           int
+		maxLoad                                                  float64
+		wait                                                     time.Duration
+		noWebLLM                                                 bool
 	)
 	c := &cobra.Command{
 		Use:   "run",
@@ -117,12 +137,19 @@ func runCmd() *cobra.Command {
 			if rounds < 5 {
 				return fmt.Errorf("--rounds %d: a publishable table needs at least 5", rounds)
 			}
-			e := &Env{Corpus: corpus, BenchCPU: benchCPU, BenchMetal: benchMetal, PP: pp, TG: tg,
+			if (handCPU == "") != (handMetal == "") {
+				return fmt.Errorf("--hand-cpu and --hand-metal go together")
+			}
+			path, err := exec.LookPath(bench)
+			if err != nil {
+				return fmt.Errorf("the go-pkgx bottle is not installed (pkgm install github.com/ggml-org/llama.cpp): %w", err)
+			}
+			e := &Env{Corpus: corpus, PP: pp, TG: tg,
 				MaxLoad: maxLoad, MaxRedo: 40, Wait: wait, Channel: "chromium", Out: cmd.OutOrStdout(),
-				execOutput: defaultExec, sleep: time.Sleep, runLlama: llamaRun, runWebLLM: webllmRun,
+				execOutput: defaultExec, execOutputBoth: defaultExecBoth, sleep: time.Sleep, runLlama: llamaRun, runWebLLM: webllmRun,
 				prompt: "the" + strings.Repeat(" the", pp-1)}
 			e.loadFn = func(ctx context.Context) (float64, error) { return uptimeLoad(ctx, e.execOutput) }
-			cfgs := configs(corpus, smol, qwen, "")
+			cfgs := configs(corpus, smol, qwen, path, handCPU, handMetal, !noWebLLM)
 			if only != "" {
 				var keep []Config
 				for _, c := range cfgs {
@@ -132,18 +159,28 @@ func runCmd() *cobra.Command {
 				}
 				cfgs = keep
 			}
-			addr, stop, err := serve(corpus)
-			if err != nil {
-				return err
+			for _, c := range cfgs {
+				if c.Kind == "llamacpp-cpu" {
+					if err := VerifyCPU(cmd.Context(), e, c); err != nil {
+						return fmt.Errorf("%s: %w", c.Name, err)
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "verified: %s took no layer on a GPU\n", c.Name)
+				}
 			}
-			defer stop()
-			e.srvAddr = addr
-			pw, err := playwright.Run()
-			if err != nil {
-				return err
+			if !noWebLLM {
+				addr, stop, err := serve(corpus)
+				if err != nil {
+					return err
+				}
+				defer stop()
+				e.srvAddr = addr
+				pw, err := playwright.Run()
+				if err != nil {
+					return err
+				}
+				defer pw.Stop()
+				e.pw = pw
 			}
-			defer pw.Stop()
-			e.pw = pw
 			samples, err := Interleave(cmd.Context(), e, cfgs, rounds)
 			if len(samples) > 0 {
 				if werr := writeSamples(out, samples); werr != nil && err == nil {
@@ -156,8 +193,10 @@ func runCmd() *cobra.Command {
 	}
 	f := c.Flags()
 	f.StringVar(&corpus, "corpus", "", "corpus directory")
-	f.StringVar(&benchCPU, "bench-cpu", "", "llama-bench built with GGML_METAL=OFF GGML_BLAS=OFF")
-	f.StringVar(&benchMetal, "bench-metal", "", "llama-bench built with Metal")
+	f.StringVar(&bench, "bench", "llama-bench", "llama-bench of the go-pkgx bottle (default: from PATH)")
+	f.StringVar(&handCPU, "hand-cpu", "", "comparison only: a hand-built llama-bench without Metal and BLAS")
+	f.StringVar(&handMetal, "hand-metal", "", "comparison only: a hand-built llama-bench with Metal")
+	f.BoolVar(&noWebLLM, "no-webllm", false, "skip the WebLLM rows (and the browser)")
 	f.StringVar(&smol, "smollm2", "", "SmolLM2 GGUF, relative to the corpus")
 	f.StringVar(&qwen, "qwen", "", "Qwen2.5 GGUF, relative to the corpus")
 	f.StringVar(&out, "out", "", "results JSON")
@@ -167,7 +206,7 @@ func runCmd() *cobra.Command {
 	f.IntVar(&tg, "tg", 128, "generated tokens")
 	f.Float64Var(&maxLoad, "max-load", 8, "do not start a run while the 1-minute load is above this")
 	f.DurationVar(&wait, "wait", 30*time.Second, "pause between load checks")
-	for _, n := range []string{"corpus", "bench-cpu", "bench-metal", "smollm2", "qwen", "out"} {
+	for _, n := range []string{"corpus", "smollm2", "qwen", "out"} {
 		_ = c.MarkFlagRequired(n)
 	}
 	return c
