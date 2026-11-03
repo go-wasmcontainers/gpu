@@ -14,7 +14,6 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -23,8 +22,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/mxschmitt/playwright-go"
 )
 
 type caseSpec struct {
@@ -109,7 +106,7 @@ func TestWebGPUBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 	cs, _ := json.Marshal(cases(t, root))
-	for name, body := range map[string][]byte{"index.html": []byte(page), "worker.js": []byte(worker), "wasm_exec.js": wasmExec, "cases.json": cs} {
+	for name, body := range map[string][]byte{"index.html": []byte(page + reportPoster), "worker.js": []byte(worker), "wasm_exec.js": wasmExec, "cases.json": cs} {
 		if err := os.WriteFile(filepath.Join(site, name), body, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -117,54 +114,10 @@ func TestWebGPUBackend(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle("/data/", http.StripPrefix("/data/", http.FileServer(http.Dir(root))))
 	mux.Handle("/", http.FileServer(http.Dir(site)))
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := &http.Server{Handler: mux}
-	go srv.Serve(ln)
-	defer srv.Close()
-
-	pw, err := playwright.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pw.Stop()
-	channel := os.Getenv("GPU_E2E_CHANNEL")
-	if channel == "" {
-		channel = "chromium"
-	}
-	opts := playwright.BrowserTypeLaunchOptions{Headless: playwright.Bool(true), Channel: playwright.String(channel)}
-	allowFallback := os.Getenv("GPU_E2E_ALLOW_FALLBACK") == "1"
-	if allowFallback {
-		opts.Args = []string{"--enable-unsafe-webgpu"}
-	}
-	b, err := pw.Chromium.Launch(opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer b.Close()
-	p, err := b.NewPage()
-	if err != nil {
-		t.Fatal(err)
-	}
-	q := ""
-	if allowFallback {
-		q = "?fallback=1"
-	}
-	url := fmt.Sprintf("http://localhost:%d/index.html%s", ln.Addr().(*net.TCPAddr).Port, q)
-	if _, err := p.Goto(url); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.WaitForFunction("() => window.__report !== undefined", nil, playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(300000)}); err != nil {
-		t.Fatal(err)
-	}
-	v, err := p.Evaluate("window.__report")
-	if err != nil {
-		t.Fatal(err)
-	}
+	port, reports := serve(t, mux)
+	v, version := fetchReport(t, port, reports, allowFallback(), launchFallbackArgs(), 5*time.Minute)
 	var rep report
-	if err := json.Unmarshal([]byte(v.(string)), &rep); err != nil {
+	if err := json.Unmarshal([]byte(v), &rep); err != nil {
 		t.Fatal(err)
 	}
 	if rep.Error != "" {
@@ -174,11 +127,11 @@ func TestWebGPUBackend(t *testing.T) {
 	what := "GPU"
 	if a.Fallback || strings.Contains(strings.ToLower(a.Architecture+a.Vendor), "swiftshader") {
 		what = "FALLBACK (software, not a GPU)"
-		if !allowFallback {
+		if os.Getenv("GPU_E2E_ALLOW_FALLBACK") != "1" {
 			t.Fatalf("adapter %s %s is a fallback adapter: this run cannot prove the GPU path", a.Vendor, a.Architecture)
 		}
 	}
-	t.Logf("browser %s, adapter %s %s: %s", b.Version(), a.Vendor, a.Architecture, what)
+	t.Logf("browser %s, adapter %s %s: %s", version, a.Vendor, a.Architecture, what)
 	pass, total := 0, 0.0
 	for _, r := range rep.Results {
 		total += r.Ms

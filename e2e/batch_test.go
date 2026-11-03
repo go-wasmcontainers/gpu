@@ -4,18 +4,16 @@ package e2e
 
 import (
 	"encoding/json"
-	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/mxschmitt/playwright-go"
+	"time"
 
 	"github.com/go-wasmcontainers/engine/runtime/browser"
 )
@@ -34,12 +32,13 @@ func runBatchCases(t *testing.T, cases []engineCase, launch []string, query stri
 	site := t.TempDir()
 	build(t, root, filepath.Join(site, "enginetest.wasm"), "./internal/cmd/enginetest", "js")
 	build(t, root, filepath.Join(site, "batchcompute.wasm"), "./examples/batchcompute", "wasip1")
+	build(t, root, filepath.Join(site, "hang.wasm"), "./e2e/testdata/hang", "wasip1")
 	wasmExec, err := os.ReadFile(filepath.Join(runtime.GOROOT(), "lib", "wasm", "wasm_exec.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	cs, _ := json.Marshal(cases)
-	files := map[string][]byte{"index.html": []byte(enginePage), "engine.js": []byte(engineWorker), "wasm_exec.js": wasmExec,
+	files := map[string][]byte{"index.html": []byte(enginePage + reportPoster), "engine.js": []byte(engineWorker), "wasm_exec.js": wasmExec,
 		"container-worker.js": browser.WorkerJS, "cases.json": cs}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(site, name), body, 0o644); err != nil {
@@ -47,49 +46,15 @@ func runBatchCases(t *testing.T, cases []engineCase, launch []string, query stri
 		}
 	}
 	fs := http.FileServer(http.Dir(site))
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	port, reports := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 		w.Header().Set("Cross-Origin-Embedder-Policy", "require-corp")
 		fs.ServeHTTP(w, r)
-	})}
-	go srv.Serve(ln)
-	defer srv.Close()
-
-	pw, err := playwright.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pw.Stop()
-	channel := os.Getenv("GPU_E2E_CHANNEL")
-	if channel == "" {
-		channel = "chromium"
-	}
-	opts := playwright.BrowserTypeLaunchOptions{Headless: playwright.Bool(true), Channel: playwright.String(channel)}
-	opts.Args = append(append(opts.Args, strings.Fields(os.Getenv("GPU_E2E_ARGS"))...), launch...)
-	b, err := pw.Chromium.Launch(opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer b.Close()
-	p, err := b.NewPage()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var console []string
-	p.On("console", func(m playwright.ConsoleMessage) { console = append(console, m.Text()) })
-	if _, err := p.Goto(fmt.Sprintf("http://localhost:%d/index.html%s", ln.Addr().(*net.TCPAddr).Port, query)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.WaitForFunction("() => window.__report !== undefined", nil, playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(600000)}); err != nil {
-		t.Fatalf("%v\nconsole: %s", err, strings.Join(console, "\n"))
-	}
-	v, _ := p.Evaluate("window.__report")
+	}))
+	v, version := fetchReport(t, port, reports, query, launch, 10*time.Minute)
+	t.Logf("browser %s", version)
 	var rep engineReport
-	if err := json.Unmarshal([]byte(v.(string)), &rep); err != nil {
+	if err := json.Unmarshal([]byte(v), &rep); err != nil {
 		t.Fatal(err)
 	}
 	if rep.Error != "" {
@@ -106,6 +71,9 @@ func runBatchCases(t *testing.T, cases []engineCase, launch []string, query stri
 func requireGPU(t *testing.T, rep engineReport) {
 	t.Helper()
 	a := rep.Adapter
+	if rep.AdapterError != "" {
+		t.Fatalf("no WebGPU adapter in %s: %s", browserName(), rep.AdapterError)
+	}
 	fallback := a.Fallback || strings.Contains(strings.ToLower(a.Architecture+a.Vendor), "swiftshader")
 	t.Logf("adapter %s %s, fallback %v", a.Vendor, a.Architecture, fallback)
 	if fallback && os.Getenv("GPU_E2E_ALLOW_FALLBACK") != "1" {
@@ -198,6 +166,57 @@ func TestBatchFallbackRefused(t *testing.T) {
 		t.Errorf("exit %d, stdout %q", r.Exit, r.Stdout)
 	}
 }
+
+// TestBatchDeadline: a guest submits a compute shader sized from the
+// adapter's limits to run far past the host's 2 s of GPU time. The host must
+// destroy the device at about 2 s and answer Timeout; the next submit of that
+// container is ContextLost; and the engine keeps serving: containers started
+// afterwards (compute read-back, refusals, a no-GPU container) pass.
+func TestBatchDeadline(t *testing.T) {
+	cases := []engineCase{
+		{Name: "before", Module: "batchcompute.wasm", GPU: true},
+		{Name: "hang", Module: "hang.wasm", GPU: true},
+		{Name: "after", Module: "batchcompute.wasm", GPU: true},
+		{Name: "after-refusals", Module: "batchcompute.wasm", Args: []string{"refusals"}, GPU: true},
+		{Name: "after-no-gpu", Module: "batchcompute.wasm"},
+	}
+	rep := runBatchCases(t, cases, launchFallbackArgs(), allowFallback())
+	requireGPU(t, rep)
+	byName := map[string]int{}
+	for i, r := range rep.Results {
+		byName[r.Name] = i
+		t.Logf("%s (%.0f ms): exit %d\n%s%s", r.Name, r.Ms, r.Exit, r.Stdout, r.Stderr)
+	}
+	h := rep.Results[byName["hang"]]
+	m := deadlineMs.FindStringSubmatch(h.Stdout)
+	if h.Exit != 0 || m == nil {
+		t.Fatalf("hang: exit %d (%s), stdout %q", h.Exit, h.Error, h.Stdout)
+	}
+	ms, _ := strconv.Atoi(m[1])
+	// 2 s timer, plus the round trip: at about 2 s, never well under, never
+	// the several seconds the shader needs to finish.
+	if ms < 1900 || ms > 3500 {
+		t.Errorf("the host answered after %d ms, want about 2000", ms)
+	}
+	for _, s := range []string{"(timeout as expected: true)", "(device gone as expected: true)"} {
+		if !strings.Contains(h.Stdout, s) {
+			t.Errorf("hang stdout lacks %q", s)
+		}
+	}
+	for name, out := range map[string]string{"before": "262144 elements match the CPU", "after": "262144 elements match the CPU",
+		"after-refusals": "8 frames refused", "after-no-gpu": "no GPU: wasi_webgpu_batch: caps: denied"} {
+		r := rep.Results[byName[name]]
+		want := 0
+		if name == "after-no-gpu" {
+			want = 2
+		}
+		if r.Exit != want || !strings.Contains(r.Stdout, out) {
+			t.Errorf("%s after the hang: exit %d (%s), stdout %q", name, r.Exit, r.Error, r.Stdout)
+		}
+	}
+}
+
+var deadlineMs = regexp.MustCompile(`long submit: .* after (\d+) ms`)
 
 // loadAverage is the 1-minute load average (uptime), or -1.
 func loadAverage() float64 {

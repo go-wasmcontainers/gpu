@@ -57,8 +57,11 @@ type Result struct {
 // Report is what the worker posts.
 type Report struct {
 	Adapter wg.AdapterInfo `json:"adapter"`
-	Results []Result       `json:"results"`
-	Error   string         `json:"error,omitempty"`
+	// AdapterError is why no adapter was obtained (no navigator.gpu, or
+	// requestAdapter refused), empty when Adapter is set.
+	AdapterError string   `json:"adapterError,omitempty"`
+	Results      []Result `json:"results"`
+	Error        string   `json:"error,omitempty"`
 	// ConfiguredSurfaces is how many surfaces still hold a WebGPU context
 	// once every container has ended: they all dropped theirs, so 0.
 	ConfiguredSurfaces int64 `json:"configuredSurfaces"`
@@ -108,10 +111,12 @@ func main() {
 		return
 	}
 	allow := js.Global().Get("location").Get("search").String() == "?fallback=1"
-	if g, err := wg.Navigator(); err == nil {
-		if a, err := g.RequestAdapter(context.Background(), &wg.RequestAdapterOptions{AllowFallback: true}); err == nil {
-			rep.Adapter = a.Info()
-		}
+	if g, err := wg.Navigator(); err != nil {
+		rep.AdapterError = "navigator.gpu: " + err.Error()
+	} else if a, err := g.RequestAdapter(context.Background(), &wg.RequestAdapterOptions{AllowFallback: true}); err != nil {
+		rep.AdapterError = "requestAdapter: " + err.Error()
+	} else {
+		rep.Adapter = a.Info()
 	}
 	nnMod := nn.NewModule()
 	nnMod.Backends = append(nnMod.Backends, nnwebgpu.Backend{Limits: onnx.DefaultLimits, AllowFallback: allow})
