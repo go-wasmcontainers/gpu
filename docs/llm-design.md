@@ -1,7 +1,9 @@
 # Small LLMs on the GPU for WASI containers: design
 
-Status: **design** (bibliography and decisions). Steps 1 M1 and M2 are
-implemented (see the table of missing pieces); nothing else is.
+Status: **design** (bibliography and decisions). M1 to M6 are implemented
+(see the table of missing pieces): the host ABI of plan steps 1 and 2 works
+end to end in a container on Chromium and the Apple GPU; M7 and everything
+from step 3 on (GGUF, tokenizers, forward pass, kernels) are not.
 Every reference in the last section was opened on 2026-11-02 while writing
 this page; figures marked *probe* were read from live HTTP responses that day.
 No performance was measured for this page.
@@ -91,10 +93,10 @@ live in the guest.
 |---|---|---|---|
 | M1 | **Done** (go-gfx/webgpu v0.7.0, go-virtio/gpudev v0.2.0). Transport-free webgpu-batch host context: package **`go-gfx/webgpu/batch`** (`Context` with `Create`/`Destroy`/`Stream`/`Lookup`, `Backend`, `Reader`, and `DeviceBackend` under `GOOS=js`), not `gpudev/batch`: gpudev depends on go-gfx/webgpu, and the context needs only `wire`, so the lowest shared library hosts it and `wgpubatch` framing stays in go-virtio/gpu. gpudev is rewired onto it, no behaviour change | go-gfx/webgpu | one implementation of the frame semantics |
 | M2 | **Done in go-gfx/webgpu v0.7.0; gpudev transport open** ([gpudev#10](https://github.com/go-virtio/gpudev/issues/10)). **Read-back through the stream, not `RemoteSink.Read`**: `wire.ReadBuffer` (**opcode 34**, `StreamVersion` **4**: id, offset(2), size, windowOffset), `Recorder.ReadBuffer`, `ReadSink.SubmitRead`, a remote `Buffer.MapAsync` (read mode), `Quota.ReadBytes`. Rules are `GPUBuffer.mapAsync`'s. Window **MaxRead 1 MiB by default, 64 MiB at most** (`wire.MaxReadWindow`), checked before replay. gpudev passes no window, so it refuses a reading stream and `Bind` stays `ErrBind` | go-gfx/webgpu, gpudev | the guest must read the sampled token (4 bytes) and, in tests, activations |
-| M3 | Features and limits in the capset: `shader-f16`, `subgroups`, `maxStorageBufferBindingSize`, `maxComputeWorkgroupStorageSize`, `maxComputeInvocationsPerWorkgroup` (capset version 2) | go-virtio/gpu `wgpubatch` | the guest picks kernel variants; a remote device has no adapter to ask |
-| M4 | Host-side range checks on replay: `WriteBuffer`, `CopyBufferToBuffer` ranges against buffer sizes, `Dispatch` counts against `maxComputeWorkgroupsPerDimension`, before `replay.js` | go-gfx/webgpu (`checkReplay`) | today these reach WebGPU validation (`wire.Decode` checks ids and data ranges, not buffer sizes) [gfx-replay]; a Go error at submit is the rule of the library |
-| M5 | Host module `wasi_webgpu_batch` for `wasip1` guests (below) | go-wasmcontainers/gpu | the transport |
-| M6 | Guest sink: a `RemoteSink` over M5, frames built with `wgpubatch.Encoder` | go-wasmcontainers/gpu (`wasigpu`) | guests write against the go-gfx/webgpu API unchanged |
+| M3 | **Done** (go-virtio/gpu v0.10.0, [#15](https://github.com/go-virtio/gpu/pull/15)). Features and limits in the capset, version 2 (64 bytes; a version 1 blob decodes unchanged): feature bits `shader-f16` and `subgroups`, `maxStorageBufferBindingSize`, `maxComputeWorkgroupStorageSize`, `maxComputeInvocationsPerWorkgroup`, `maxComputeWorkgroupsPerDimension`, `maxStorageBuffersPerShaderStage` (`Caps.Device`); the guest asks for `min(max_version, CapsVersion)`, frames stay at version 1. The host module reports the device's limits (the smaller of WebGPU's defaults and the adapter's) | go-virtio/gpu `wgpubatch` | the guest picks kernel variants; a remote device has no adapter to ask |
+| M4 | **Done** (go-gfx/webgpu v0.8.0, [#17](https://github.com/go-gfx/webgpu/pull/17)). `wire.CheckRanges`: `WriteBuffer` and `CopyBufferToBuffer` ranges and indirect-argument ranges against buffer sizes, `Dispatch` counts against `maxComputeWorkgroupsPerDimension` (65 535, or `batch.Config.MaxWorkgroups`), errors wrapping `wire.ErrRange`, in `batch.Context.Stream` **and** `Device.Replay`, before the backend or `replay.js`; `wire.RemapCmds`; `FuzzCheckRanges` | go-gfx/webgpu (`checkReplay`) | today these reach WebGPU validation (`wire.Decode` checks ids and data ranges, not buffer sizes) [gfx-replay]; a Go error at submit is the rule of the library |
+| M5 | **Done** (go-wasmcontainers/gpu v0.7.0, `gpubatch`; engine v0.32.0 for `run --gpu-memory`). Host module `wasi_webgpu_batch` for `wasip1` guests (below), `FuzzBatchCalls` | go-wasmcontainers/gpu | the transport |
+| M6 | **Done** (go-wasmcontainers/gpu v0.7.0, `wasigpu/batchsink`, not in `llm`: it is the guest half of M5's ABI, released and tested with it, and any Go guest can use it; `llm` imports it). A `ReadSink` over M5, frames built with `wgpubatch.Encoder`; creations and destructions ride with the next submit, so one `Submit` is one crossing; `examples/batchcompute` | go-wasmcontainers/gpu (`wasigpu`) | guests write against the go-gfx/webgpu API unchanged |
 | M7 | Read-only mount of a host-fetched model file into the container (`/models/<name>.gguf`) | go-wasmcontainers/engine, playground | the guest reads weights by `fd_read`; it never fetches |
 
 ### The host module (M5)
@@ -172,8 +174,32 @@ second (10 ms) it is 1.2 %. Reading the logits instead (600 KB for Qwen2.5)
 would cost about 0.15 ms more than the sampled token but 600 KB of window per
 token and the CPU argmax: still well below the 1 MiB window, but the GPU
 `argmax` stays, for the window, not for latency. The guest's own crossing
-(the 38 µs of DESIGN.md R3) comes on top. Not measured: a `wasip1` guest,
-Firefox, a non-trivial kernel.
+(the 38 µs of DESIGN.md R3) comes on top. Not measured: Firefox, a
+non-trivial kernel.
+
+**Measured from a `wasip1` guest, 2026-11-03** (`examples/batchcompute bench`,
+run by `e2e/batch_test.go` `TestBatchRoundTrip`: a real container in the
+engine's browser executor, Chromium on the Apple M4 Max, Metal, the host
+module's `submit` with a 1-minute load of 6.4 to 7.3 (below the 8 ceiling);
+medians of 30 interleaved rounds, three runs, timer steps of about 5 to 25 µs):
+
+| window | read only, guest | host only (above) | compute pass + copy + read, guest | host only |
+|---:|---:|---:|---:|---:|
+| 4 KiB | 315–375 µs | 124 µs | 735–800 µs | 270 µs |
+| 1 MiB | 895–1 105 µs | 155 µs | 1 160–1 380 µs | 320 µs |
+
+So the guest crossing costs about **200 µs on top of the host figure at
+4 KiB and 750 to 950 µs at 1 MiB** for a read; the compute-and-read submit
+adds about 460 µs (4 KiB) and 840 to 1 060 µs (1 MiB). The 1 MiB excess is
+the window (the host copies it into guest memory, and the guest copies it
+again into the recorder's `Readback`) and the frame copy; the 4 KiB excess is
+the crossing itself (the executor's wait and resume, the frame copy, the
+recorder and the encoder), and is not split further: that is a measurement
+still to make. At 4 KiB the per-token budget is therefore about 0.3 to 0.4 ms
+for a 4-byte read and 0.75 ms for the trivial compute floor, not the 0.12 and
+0.27 ms of the host-only figures: 1.5 % and 0.8 % of a 50 ms token, still
+small; a ceiling of about 1 300 trivial submits per second before any model
+work. The figures vary by about ±15 % between runs at this load.
 
 ## The guest: an inference library in Go
 
@@ -347,7 +373,7 @@ Each step: a PR in its owner repository, tests natively and in Playwright
 |---|---|---|
 | 0 | Baselines | The table above filled for both models on the M4 Max (llama.cpp one core; WebLLM in Chromium), with load average, versions and commands committed under `docs/` |
 | 1 | Host ABI pieces: **M1 and M2 done** (go-gfx/webgpu v0.7.0, go-virtio/gpudev v0.2.0; acceptance passed in Chromium on Apple Metal, every element of a 4 KiB and a 1 MiB read-back equal; remaining: the gpudev read window), M3 capset v2 (go-virtio/gpu), M4 replay range checks (go-gfx/webgpu) | gpudev's existing e2e still pass through the exported context; a remote `MapAsync` reads back what a compute pass wrote, in-process and in Chromium; a stream writing past a buffer is refused at submit with a Go error; fuzz targets extended |
-| 2 | `wasi_webgpu_batch` host module (M5), guest sink (M6), `--gpu-memory` | A `wasip1` container doubles a buffer through a remote device and reads it back, in Chromium and Firefox; one `submit` per frame counted; `FuzzBatchCalls` in CI; refusals tested: no `--gpu`, `--gpu-memory` above 1.5 GiB, an allocation past the quota, an id of another context, a frame above `max_frame`, a read outside the window, a 2 s overrun |
+| 2 | **Done in Chromium on the Apple GPU** (gpu v0.7.0, engine v0.32.0; open: Firefox, the "double a buffer" kernel of the acceptance (the example writes known values instead) and the 2 s overrun in a browser, which the host's unit tests cover with a fake device). `wasi_webgpu_batch` host module (M5), guest sink (M6), `--gpu-memory` | A `wasip1` container doubles a buffer through a remote device and reads it back, in Chromium and Firefox; one `submit` per frame counted; `FuzzBatchCalls` in CI; refusals tested: no `--gpu`, `--gpu-memory` above 1.5 GiB, an allocation past the quota, an id of another context, a frame above `max_frame`, a read outside the window, a 2 s overrun |
 | 3 | `gguf` parser and dequantisation (F32, F16, Q4_0, Q8_0, Q4_K, Q6_K) | Headers of both models read over HTTP ranges; `FuzzGGUF` with a committed corpus and a refusal test per bound; dequantised values bit-identical to ggml's `dequantize_row_*` on every tensor |
 | 4 | Tokenizers (`gpt2`, `llama`) | Token ids identical to llama.cpp's tokenizer on a committed multilingual corpus, both directions |
 | 5 | CPU forward pass (`llama`, `qwen2`), KV cache, sampling — the oracle port | Logits within 1e-3 relative of llama.cpp's for a fixed prompt; 64 greedy tokens identical; tok/s vs llama.cpp `-t 1` in the README |
