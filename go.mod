@@ -3,7 +3,7 @@ module github.com/go-wasmcontainers/gpu
 go 1.27.3
 
 require (
-	github.com/go-gfx/webgpu v0.3.0
+	github.com/go-gfx/webgpu v0.7.0
 	github.com/go-wasmcontainers/engine v0.31.0
 	github.com/mxschmitt/playwright-go v0.6201.1
 	github.com/spf13/cobra v1.10.2
