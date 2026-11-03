@@ -198,6 +198,34 @@ jobs:
           cat "$RUNNER_TEMP/e2e.log"
           exit $status
 
+  # PROBE: does a GitHub macOS image's Safari offer WebGPU? WebKit reports no
+  # WebGPU hardware on virtual machines unless WebKitAllowWebGPUOnVMs is set
+  # (Source/WebGPU/WebGPU/HardwareCapabilities.mm). The lane fails, never
+  # skips, without a non-fallback adapter.
+  webgpu-safari:
+    name: WebGPU e2e (Safari, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version: '1.27.3' }
+      - run: defaults read /Applications/Safari.app/Contents/Info CFBundleShortVersionString && sw_vers
+      - run: sudo safaridriver --enable
+      - name: go test -tags e2e (Safari)
+        shell: bash
+        env:
+          GPU_E2E_BROWSER: safari
+        run: |
+          status=0
+          go test -tags e2e -count=1 -v -timeout 15m -run 'TestBatch|TestWebGPUBackend' ./e2e/ > "$RUNNER_TEMP/e2e.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/e2e.log"
+          exit $status
+
   cross:
     name: cross ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
