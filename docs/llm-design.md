@@ -97,7 +97,7 @@ live in the guest.
 | M4 | **Done** (go-gfx/webgpu v0.8.0, [#17](https://github.com/go-gfx/webgpu/pull/17)). `wire.CheckRanges`: `WriteBuffer` and `CopyBufferToBuffer` ranges and indirect-argument ranges against buffer sizes, `Dispatch` counts against `maxComputeWorkgroupsPerDimension` (65 535, or `batch.Config.MaxWorkgroups`), errors wrapping `wire.ErrRange`, in `batch.Context.Stream` **and** `Device.Replay`, before the backend or `replay.js`; `wire.RemapCmds`; `FuzzCheckRanges` | go-gfx/webgpu (`checkReplay`) | today these reach WebGPU validation (`wire.Decode` checks ids and data ranges, not buffer sizes) [gfx-replay]; a Go error at submit is the rule of the library |
 | M5 | **Done** (go-wasmcontainers/gpu v0.7.0, `gpubatch`; engine v0.32.0 for `run --gpu-memory`). Host module `wasi_webgpu_batch` for `wasip1` guests (below), `FuzzBatchCalls` | go-wasmcontainers/gpu | the transport |
 | M6 | **Done** (go-wasmcontainers/gpu v0.7.0, `wasigpu/batchsink`, not in `llm`: it is the guest half of M5's ABI, released and tested with it, and any Go guest can use it; `llm` imports it). A `ReadSink` over M5, frames built with `wgpubatch.Encoder`; creations and destructions ride with the next submit, so one `Submit` is one crossing; `examples/batchcompute` | go-wasmcontainers/gpu (`wasigpu`) | guests write against the go-gfx/webgpu API unchanged |
-| M7 | Read-only mount of a host-fetched model file into the container (`/models/<name>.gguf`) | go-wasmcontainers/engine, playground | the guest reads weights by `fd_read`; it never fetches |
+| M7 | **Done in the engine (PR [engine#60](https://github.com/go-wasmcontainers/engine/pull/60)); playground wiring open.** Read-only mount of a pinned model (`/models/<name>.gguf`): `rootfs.FS.AddExternal` (read on demand, no copy, `ErrReadOnly` on every write path), package `models` (registry by commit and sha256, 2 GiB cap, size then sha256 before first use, native cache, `Fetcher` with a host allow-list at every redirect), `wctr run --model NAME` / `-v model=NAME:/path`. Browser: `models.OpenOPFS` fills the origin's OPFS by 16 MiB ranges, verifies, reads through a sync access handle. **Finding:** a guest's `fd_read` runs inside a `syscall/js` callback where Go cannot wait for the network (the first design, ranged HTTP at read time, deadlocked), hence OPFS. Open: the playground (CSP `connect-src`, registry UI) | go-wasmcontainers/engine, playground | the guest reads weights by `fd_read`; it never fetches |
 
 ### The host module (M5)
 
@@ -378,7 +378,7 @@ Each step: a PR in its owner repository, tests natively and in Playwright
 | 4 | Tokenizers (`gpt2`, `llama`) | Token ids identical to llama.cpp's tokenizer on a committed multilingual corpus, both directions |
 | 5 | CPU forward pass (`llama`, `qwen2`), KV cache, sampling — the oracle port | Logits within 1e-3 relative of llama.cpp's for a fixed prompt; 64 greedy tokens identical; tok/s vs llama.cpp `-t 1` in the README |
 | 6 | Registry, fetcher, OPFS cache, read-only mount (M7), CSP | A container reads `/models/NAME.gguf`; a second run makes zero model requests; a corrupted cache file is detected and refetched; an interrupted download resumes; a size or sha256 mismatch is refused; a test checks that every registry entry still redirects to a host the CSP lists |
-| 7 | WGSL kernels, f32, default limits; weight upload by chunks | Each kernel: emulated index test + browser test against step 5; peak guest memory during load below 64 MiB for the 0.5 B model; 32 greedy tokens identical to the CPU path on Chromium/Metal and Firefox; GPU memory charged equals the guest's computed sum |
+| 7 | **Done for SmolLM2-135M Q4_0 in Chromium/Metal ([llm#2](https://github.com/go-wasmcontainers/llm/pull/2), go-wasmcontainers/gpu `TestLLMOracle`); Firefox, NVIDIA and AMD not run** (see "Progress 2026-11-03"). WGSL kernels, f32, default limits; weight upload by chunks | Each kernel: emulated index test + browser test against step 5; peak guest memory during load below 64 MiB for the 0.5 B model; 32 greedy tokens identical to the CPU path on Chromium/Metal and Firefox; GPU memory charged equals the guest's computed sum |
 | 8 | Streaming chat container (`examples/chat`), one `submit` per token | Tokens stream in the playground; one crossing per decode token counted; decode tok/s vs WebLLM recorded |
 | 9 | f16 and subgroup variants, prefill tiling, tuning | Same token test with variants on; performance table updated against WebLLM |
 | 10 | Playground demo, landing, docs | Published pages checked (200, new text) |
@@ -428,3 +428,70 @@ Each step: a PR in its owner repository, tests natively and in Playwright
 - [gh-pages] GitHub Docs, GitHub Pages limits
 - [hf-tree] Hugging Face API, file trees of `Qwen/Qwen2.5-0.5B-Instruct-GGUF` and `onnx-community/Qwen2.5-0.5B-Instruct`, model-card tags, 2026-11-02
 - go-wasmcontainers/gpu `README.md`, `docs/DESIGN.md`, `nn/nn.go`, `go.mod`
+
+## Progress 2026-11-03: SmolLM2-135M Q4_0 in a container on the Apple GPU
+
+Library and container: [go-wasmcontainers/llm](https://github.com/go-wasmcontainers/llm)
+(`gguf`, tokenizer, CPU oracle path, f32 kernels, `examples/generate`). Model
+file pinned in go-wasmcontainers-llm-corpus (`bartowski/SmolLM2-135M-Instruct-GGUF`
+commit 09816acd, sha256 bcc3af28...); its tensors are Q4_0, **Q4_1 (three
+`ffn_down`)** and Q8_0 (the tied embedding and output); the kernels cover those.
+
+Bibliography opened: ggml `docs/gguf.md` (header, alignment 32), llama.cpp
+8642541 `ggml-common.h` (`block_q4_0`), `ggml-quants.c` (`quantize_row_q8_0_ref`,
+`quantize_row_q8_1_ref`), `ggml-cpu/quants.c` (`ggml_vec_dot_q4_1_q8_1_generic`),
+`src/llama-vocab.cpp` (`LLAMA_VOCAB_PRE_TYPE_SMOLLM` regexes), `src/models/llama.cpp`
+(RMSNorm, rope type NORM, GQA, SiLU MLP, tied output), `tools/server/README.md`
+(`n_probs`, `return_tokens`).
+
+**Oracle** (llama-server 0.8.0, one thread, greedy, four fixed prompts, 32 tokens;
+openssl 3.5.8 for that bottle; only Apple Metal run):
+
+- tokenizer ids equal llama.cpp's `/tokenize` on all four;
+- the container's GPU tokens equal llama.cpp's on 2 of 4 prompts (32 of 32);
+  the other two diverge at token 10 and token 22, at a gap of 0.157 and 0.116
+  nats in llama.cpp's own distribution. The Go CPU path in f32 does the same
+  (and so does its ggml-exact mode, with Q8_0 activations and an f16 cache:
+  llama.cpp is not reproduced to 1e-3; step-1 logit differences reach 0.4 nats).
+  **So the acceptance "at least the first 32 tokens equal" is met on two of four
+  prompts and not on the others**; what the tests assert is equality up to a
+  near-tie (0.25 nats, after at least 6 equal tokens);
+- GPU against the Go CPU f32 path: logits within 1.6e-6 relative to the
+  largest logit, 16 of 16 greedy tokens equal; the residual stream after 0, 1,
+  2, 5, 15 and 30 layers agrees to 1e-7 to 1e-6 relative.
+
+**Vendor-sensitive tests** (the requirement of gpu issue "WebGPU on NVIDIA and AMD
+adapters"): the GPU-against-CPU tolerance (1e-3 relative, 600 times the measured
+value) and the GPU-against-llama.cpp near-tie rule. The kernels take the
+workgroup size (64, reduced by `maxComputeInvocationsPerWorkgroup` and workgroup
+memory), the 2-D grids and the buffer limit from the capset; use no subgroup and
+no f16; sum by tree reduction whose order depends on the workgroup size, not on
+the hardware; and take RoPE sin/cos from a double-precision table. A compiler
+that fuses multiply-adds or rounds `exp` differently will move the last bits.
+`TestLLMShaders` compiles every kernel in the browser at workgroup sizes 64 and
+32. No NVIDIA or AMD result exists.
+
+**Defect found on the way:** `CreateShaderModule` with an invalid WGSL source
+reports nothing through `wasi_webgpu_batch` (the kernels silently did no work;
+`meta` is a reserved WGSL word); only `getCompilationInfo` in the browser
+showed it. Worth a host-side check or a surfaced error.
+
+**Performance** (128-token prompt, 128 tokens, five interleaved rounds, 1-minute
+load 6.4 to 7.7, Chromium on the Apple M4 Max):
+
+| | prefill tok/s (p50, min-max) | decode tok/s (p50, min-max) |
+|---|---|---|
+| container, WebGPU, f32 kernels, one submit per token | 311 (302-318) | 171 (160-176) |
+| llama.cpp CPU, one core (bottle, openssl 3.5.8) | 1286 (1278-1289) | 529 (521-531) |
+| WebLLM q4f32_1 (docs/llm-baseline) | 2656 | 224 |
+
+**Slower than the one-core CPU reference and than WebLLM on decode: an open
+defect, not optimised yet.** Per token (405 dispatches): 0.13 to 0.2 ms of
+recording in the guest, 3.8 ms (8-token context) to 5.5-6 ms (128-192 tokens) in
+`submit`, of which the crossing is about 0.4 ms. The cause is GPU time: tiny
+dispatches (about 9 us each) and an attention kernel with one workgroup per
+head walking the context serially (the 2 ms growth with context). Prefill is
+one decode pass per prompt token. Next: fewer, larger dispatches (fuse RMSNorm
+into the matvec, q/k/v and gate/up in one dispatch), a split attention, a
+matrix-matrix kernel for prefill, and the reusable Q4_0 matvec moved into
+go-gfx/webgpu (not done: the kernels live in the `llm` package for now).
