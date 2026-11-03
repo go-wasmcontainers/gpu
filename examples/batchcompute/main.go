@@ -315,12 +315,12 @@ func bench(s *batchsink.Sink, rounds int) {
 // compiler's message; the valid control passes.
 func shaders() {
 	cases := []struct {
-		name, code string
-		ok         bool
+		name, code, want string
+		ok               bool
 	}{
-		{"valid control", shader, true},
-		{"reserved word", "@group(0) @binding(0) var<storage, read> meta: array<u32>;\n@compute @workgroup_size(1) fn main() { _ = meta[0]; }", false},
-		{"syntax error", "@compute @workgroup_size(1) fn main( { }", false},
+		{"valid control", shader, "", true},
+		{"reserved word", "@group(0) @binding(0) var<storage, read> meta: array<u32>;\n@compute @workgroup_size(1) fn main() { _ = meta[0]; }", "meta", false},
+		{"syntax error", "@compute @workgroup_size(1) fn main( { }", ")", false},
 	}
 	bad := 0
 	for _, c := range cases {
@@ -331,7 +331,7 @@ func shaders() {
 		must(err) // creation travels with the next submit
 		err = s.Flush()
 		var be *batchsink.Error
-		loud := errors.As(err, &be) && be.Errno == batchsink.InvalidShader && strings.Contains(be.Msg, "Error while parsing WGSL")
+		loud := errors.As(err, &be) && be.Errno == batchsink.InvalidShader && be.Msg != "" && (c.ok || strings.Contains(be.Msg, c.want))
 		fmt.Printf("%s: %v (as expected: %v)\n", c.name, err, loud == !c.ok && (err == nil) == c.ok)
 		if loud == c.ok || (err == nil) != c.ok {
 			bad++

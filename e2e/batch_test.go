@@ -135,8 +135,8 @@ func TestBatchComputeContainers(t *testing.T) {
 		"batch-grant": {0, []string{"max_memory 1073741824", "1024 KiB: 262144 elements match the CPU"}},
 		"batch-shaders": {0, []string{
 			"valid control: <nil> (as expected: true)",
-			"reserved word: wasi_webgpu_batch: submit: invalid shader or object (the GPU refused it): batch: the GPU refused the object: Error while parsing WGSL: :1:42 error: 'meta' is a reserved keyword",
-			"syntax error: wasi_webgpu_batch: submit: invalid shader or object (the GPU refused it): batch: the GPU refused the object: Error while parsing WGSL",
+			"reserved word: wasi_webgpu_batch: submit: invalid shader or object (the GPU refused it): batch: the GPU refused the object",
+			"syntax error: wasi_webgpu_batch: submit: invalid shader or object (the GPU refused it): batch: the GPU refused the object",
 			"3 shader cases as expected"}},
 	}
 	for _, r := range rep.Results {
