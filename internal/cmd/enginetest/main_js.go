@@ -205,7 +205,10 @@ func main() {
 		return nil
 	}))
 	mods := webgpu.HostModules(webgpu.Browser{AllowFallback: allow, OnSurface: onSurface})
-	batchMod := gpubatch.NewModule(gpubatch.Browser{AllowFallback: allow})
+	// loopwork (invocation-iterations) and loopmin set the layer-4 loop
+	// budget; noloop=1 turns it off (for A/B measurements).
+	batchMod := gpubatch.NewModule(gpubatch.Browser{AllowFallback: allow,
+		LoopWork: uint64(param("loopwork")), LoopMin: uint32(param("loopmin")), NoLoopBudget: param("noloop") == 1})
 	batchMod.Limits.Budget = time.Duration(param("budget")) * time.Millisecond
 	batchMod.Limits.GPUTime = time.Duration(param("gputime")) * time.Millisecond
 	exec := browser.New(browser.Options{

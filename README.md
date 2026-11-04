@@ -93,7 +93,13 @@ container); this is its blocks M3 to M6.
   submit overruns has its device destroyed and its GPU grant revoked for the
   rest of its life (*timeout* once, then *revoked*; the engine reports a
   `gpu-sanction` event and `wctr inspect` shows `State.Sanction`); a compute
-  quota (`wire.CheckInvocations`) refuses oversized dispatches up front. Without
+  quota (`wire.CheckInvocations`) refuses oversized dispatches up front; and a
+**loop budget** (layer 4) rewrites every guest compute shader so that a loop
+that would run for seconds is cut after `2^36 / invocations` iterations
+(go-gfx/wgsl `transform.LoopBudget`, parse only; a truncated submit answers
+errno 14 *truncated*, the grant is revoked, and the hostile shader's
+victim waits tens of milliseconds, not 3 to 4.5 s). Bind group 3 is the
+host's: a guest that uses it gets errno 13 *reserved*. Without
   `--gpu` every function answers *denied*; without a GPU backend (native) or
   with only a software adapter, *unsupported*. `FuzzBatchCalls` drives
   arbitrary calls over arbitrary guest memory.

@@ -29,7 +29,20 @@ type Browser struct {
 	ReplayURL string
 	// MaxRead is the quota's read window (default DefaultLimits.MaxRead).
 	MaxRead int
+	// LoopWork is the loop budget's work per dispatch, in invocation-
+	// iterations (see batch.LoopBudget): a dispatch's loops get
+	// LoopWork/invocations iterations, rounded down to a power of two, at
+	// least LoopMin. 0 is DefaultLoopWork.
+	LoopWork uint64
+	// LoopMin is the smallest per-loop iteration budget (0: 1024).
+	LoopMin uint32
+	// NoLoopBudget turns layer 4 off: guest WGSL reaches the browser as the
+	// guest wrote it, bounded by the time budget only. For measurements.
+	NoLoopBudget bool
 }
+
+// DefaultLoopWork is Browser.LoopWork's default.
+const DefaultLoopWork = 1 << 36
 
 // WebGPU's default limits (the spec's table), which a device that asks for
 // no raised limit has; the capset reports the smaller of these and the
@@ -40,6 +53,7 @@ var defaultLimits = map[string]uint64{
 	"maxComputeInvocationsPerWorkgroup": 256,
 	"maxComputeWorkgroupsPerDimension":  65535,
 	"maxStorageBuffersPerShaderStage":   8,
+	"maxBindGroups":                     4, // the last one is the host's (layer 4)
 }
 
 // Open implements Provider.
@@ -83,24 +97,54 @@ func (b Browser) Open(memory int64) (Device, error) {
 		}
 		return min(v, defaultLimits[name])
 	}
-	return &browserDevice{dev: dev, features: features, limits: wgpubatch.DeviceLimits{
-		MaxStorageBufferBindingSize:       lim("maxStorageBufferBindingSize"),
-		MaxComputeWorkgroupStorageSize:    uint32(lim("maxComputeWorkgroupStorageSize")),
-		MaxComputeInvocationsPerWorkgroup: uint32(lim("maxComputeInvocationsPerWorkgroup")),
-		MaxComputeWorkgroupsPerDimension:  uint32(lim("maxComputeWorkgroupsPerDimension")),
-		MaxStorageBuffersPerShaderStage:   uint32(lim("maxStorageBuffersPerShaderStage")),
-	}}, nil
+	work := b.LoopWork
+	if work == 0 {
+		work = DefaultLoopWork
+	}
+	return &browserDevice{dev: dev, features: features, loop: batch.LoopBudget{
+		Work: work, MinIterations: b.LoopMin, Group: uint32(lim("maxBindGroups")) - 1}, noLoop: b.NoLoopBudget,
+		limits: wgpubatch.DeviceLimits{
+			MaxStorageBufferBindingSize:       lim("maxStorageBufferBindingSize"),
+			MaxComputeWorkgroupStorageSize:    uint32(lim("maxComputeWorkgroupStorageSize")),
+			MaxComputeInvocationsPerWorkgroup: uint32(lim("maxComputeInvocationsPerWorkgroup")),
+			MaxComputeWorkgroupsPerDimension:  uint32(lim("maxComputeWorkgroupsPerDimension")),
+			MaxStorageBuffersPerShaderStage:   uint32(lim("maxStorageBuffersPerShaderStage")),
+		}}, nil
 }
 
 type browserDevice struct {
 	dev      *wg.Device
 	features uint32
 	limits   wgpubatch.DeviceLimits
+	loop     batch.LoopBudget
+	noLoop   bool
 }
 
 func (d *browserDevice) Caps() (uint32, wgpubatch.DeviceLimits) { return d.features, d.limits }
-func (d *browserDevice) Backend() batch.Backend                 { return batch.NewDeviceBackend(d.dev) }
 func (d *browserDevice) Destroy()                               { d.dev.Destroy() }
+
+// Backend returns a backend with the loop budget on (layer 4), unless the
+// provider turned it off. If the budget's host objects cannot be made, the
+// backend refuses everything with that error: a container never runs
+// unbounded by accident.
+func (d *browserDevice) Backend() batch.Backend {
+	be := batch.NewDeviceBackend(d.dev)
+	if d.noLoop {
+		return be
+	}
+	if err := be.SetLoopBudget(d.loop); err != nil {
+		return failedBackend{err}
+	}
+	return be
+}
+
+// failedBackend is a Backend whose every creation fails with err.
+type failedBackend struct{ err error }
+
+func (f failedBackend) Create(uint32, []byte) (uint32, error) { return 0, f.err }
+func (failedBackend) Destroy(uint32)                          {}
+func (f failedBackend) Replay([]uint32, []byte) error         { return f.err }
+func (failedBackend) Close()                                  {}
 
 // drainProbe is the device Drain submits to: one per page, opened at the
 // first sanction and kept. Its work is a single workgroup; it only has to

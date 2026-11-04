@@ -38,13 +38,15 @@ func pageQuery(budgetMs, gpuTimeMs int) string {
 	if allowFallback() != "" {
 		q = append(q, "fallback=1")
 	}
-	for k, env := range map[string]string{"budget": "GPU_E2E_BUDGET_MS", "gputime": "GPU_E2E_GPUTIME_MS"} {
+	for k, env := range map[string]string{"budget": "GPU_E2E_BUDGET_MS", "gputime": "GPU_E2E_GPUTIME_MS",
+		// layer 4: the loop budget's work, its floor, and 1 to switch it off
+		"loopwork": "GPU_E2E_LOOP_WORK", "loopmin": "GPU_E2E_LOOP_MIN", "noloop": "GPU_E2E_NO_LOOP_BUDGET"} {
 		v := os.Getenv(env)
 		if v == "" {
 			switch k {
 			case "budget":
 				v = strconv.Itoa(budgetMs)
-			default:
+			case "gputime":
 				v = strconv.Itoa(gpuTimeMs)
 			}
 		}
@@ -69,6 +71,9 @@ func runBatchCasesSanctions(t *testing.T, cases []engineCase, launch []string, q
 	t.Logf("gpu time budget: %s", rep.GPU)
 	if rep.GPU.Sanctions != sanctions {
 		t.Errorf("%d GPU sanction(s), want %d", rep.GPU.Sanctions, sanctions)
+	}
+	if rep.GPU.LoopFallbacks != 0 {
+		t.Errorf("%d WGSL module(s) the browser refused after the loop-budget rewrite", rep.GPU.LoopFallbacks)
 	}
 	return rep
 }
@@ -250,15 +255,29 @@ func TestBatchDeadline(t *testing.T) {
 		t.Fatalf("hang: exit %d (%s), stdout %q", h.Exit, h.Error, h.Stdout)
 	}
 	ms, _ := strconv.Atoi(m[1])
-	// 2 s timer, plus the round trip: at about 2 s, never well under, never
-	// the several seconds the shader needs to finish.
-	if ms < 1900 || ms > 3500 {
+	// A software adapter (SwiftShader) runs the same loop about a thousand
+	// times slower than the GPU the default Work was measured on, so the
+	// hostile shader fits under the budget and the 2 s cap cuts it instead:
+	// the loop budget's Work is per GPU (docs/gpu-scheduling.md).
+	soft := rep.Adapter.Fallback || strings.Contains(strings.ToLower(rep.Adapter.Architecture+rep.Adapter.Vendor), "swiftshader")
+	if loopBudgetOn() && !soft {
+		// Layer 4: the loop is cut, the host answers Truncated, well before
+		// the 2 s cap.
+		if ms > 1500 {
+			t.Errorf("the host answered after %d ms, want a loop-budget cut well under the 2000 ms cap", ms)
+		}
+		if !strings.Contains(h.Stdout, "by the loop budget: true") {
+			t.Errorf("hang stdout lacks a loop-budget cut: %q", h.Stdout)
+		}
+	} else if ms < 1900 || ms > 3500 {
+		// 2 s timer, plus the round trip: at about 2 s, never well under,
+		// never the several seconds the shader needs to finish.
 		t.Errorf("the host answered after %d ms, want about 2000", ms)
 	}
 	if len(h.Events) != 1 || !strings.HasPrefix(h.Events[0], "gpu/sanction ") {
 		t.Errorf("engine events of the hostile container: %q", h.Events)
 	}
-	for _, s := range []string{"(timeout as expected: true)", "(device gone as expected: true)", "(revoked as expected: true)"} {
+	for _, s := range []string{"(cut as expected: true", "(device gone as expected: true)", "(revoked as expected: true)"} {
 		if !strings.Contains(h.Stdout, s) {
 			t.Errorf("hang stdout lacks %q", s)
 		}
@@ -275,6 +294,10 @@ func TestBatchDeadline(t *testing.T) {
 		}
 	}
 }
+
+// loopBudgetOn is whether the run has layer 4 on (the default); the A/B
+// measurements and the pre-layer-4 baseline set GPU_E2E_NO_LOOP_BUDGET=1.
+func loopBudgetOn() bool { return os.Getenv("GPU_E2E_NO_LOOP_BUDGET") != "1" }
 
 var deadlineMs = regexp.MustCompile(`long submit: .* after (\d+) ms`)
 
@@ -334,7 +357,7 @@ func TestBatchSanction(t *testing.T) {
 			}
 			query, want := pageQuery(0, 0), int64(1)
 			if mode == "control" {
-				query, want = "?budget=60000&gputime=60000", 0
+				query, want = "?budget=60000&gputime=60000&noloop=1", 0 // no loop budget either: nothing bounds the shader
 				if allowFallback() != "" {
 					query += "&fallback=1"
 				}
@@ -348,7 +371,7 @@ func TestBatchSanction(t *testing.T) {
 			}
 			h, v := rep.Results[byName["hostile"]], rep.Results[byName["victim"]]
 			if mode != "control" {
-				if h.Exit != 0 || !strings.Contains(h.Stdout, "(timeout as expected: true)") || !strings.Contains(h.Stdout, "(revoked as expected: true)") {
+				if h.Exit != 0 || !strings.Contains(h.Stdout, "(cut as expected: true") || !strings.Contains(h.Stdout, "(revoked as expected: true)") {
 					t.Errorf("hostile: exit %d (%s), stdout %q", h.Exit, h.Error, h.Stdout)
 				}
 				if len(h.Events) != 1 || !strings.HasPrefix(h.Events[0], "gpu/sanction ") || len(v.Events) != 0 {

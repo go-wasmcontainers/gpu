@@ -74,6 +74,17 @@ const (
 	// Revoked: the grant was revoked by an earlier Timeout: every call but
 	// context_destroy answers it, for the container's life.
 	Revoked Errno = 12
+	// Reserved: the guest used the bind group the host reserves for its loop
+	// budget (group 3 on a default device): a pipeline layout with more than
+	// 3 bind group layouts, a WGSL module with a binding in @group(3), or a
+	// SetBindGroup of index 3 or more. The context is lost, the grant is not
+	// revoked; last_error names the slot.
+	Reserved Errno = 13
+	// Truncated: a shader invocation hit the host's loop budget and was cut
+	// (layer 4): the stream's results are partial and are not returned. The
+	// context is lost and the grant is revoked, as for Timeout; the engine
+	// emits a "sanction" event with kind "truncated".
+	Truncated Errno = 14
 )
 
 // MaxErrorMessage bounds the text last_error returns.
@@ -264,6 +275,8 @@ func (m *Module) Open(p *wasi.Proc) wasi.Instance {
 // gctx is one guest context: a batch.Context over its own backend.
 type gctx struct {
 	c    *batch.Context
+	be   batch.Backend // the context's backend: layer 4's counters are read from it
+	loop loopStats     // the counters already added to the module's Stats
 	lost atomic.Bool
 	// closed: release was called; no frame runs on a closed context.
 	closed             atomic.Bool
@@ -440,7 +453,8 @@ func (in *instance) contextCreate(out uint32, m wasi.Memory) wasi.Result {
 			return e
 		}
 		_, dl := d.Caps()
-		c := &gctx{c: batch.New(d.Backend(), batch.Config{MaxObjects: in.lim.MaxObjects, MaxRead: in.lim.MaxRead, MaxWorkgroups: dl.MaxComputeWorkgroupsPerDimension,
+		be := d.Backend()
+		c := &gctx{be: be, c: batch.New(be, batch.Config{MaxObjects: in.lim.MaxObjects, MaxRead: in.lim.MaxRead, MaxWorkgroups: dl.MaxComputeWorkgroupsPerDimension,
 			WorkgroupInvocations: dl.MaxComputeInvocationsPerWorkgroup, MaxDispatchInvocations: in.lim.MaxDispatchInvocations, MaxStreamInvocations: in.lim.MaxStreamInvocations})}
 		in.mu.Lock()
 		defer in.mu.Unlock()
@@ -579,10 +593,24 @@ func (in *instance) runSubmit(c *gctx, frame, window []byte) Errno {
 			s.MaxInvocations = max(s.MaxInvocations, c.peak.Load())
 			s.MaxDispatchInvocations = max(s.MaxDispatchInvocations, c.peakDispatch.Load())
 		})
+		if e == Truncated {
+			// Layer 4 cut a loop: the work is already off the GPU, so there
+			// is nothing to drain; the grant goes like a timeout's.
+			in.m.record(func(s *Stats) { s.Truncations++ })
+			kind := "stream"
+			if creates {
+				kind = "create"
+			}
+			in.sanction(el, budget, kind, "loop-budget", "a shader exceeded its loop budget and was truncated; the GPU grant is revoked")
+		}
 		return e
 	case <-timer.C:
 		el := time.Since(t0)
-		in.sanction(el, budget, creates)
+		kind := "stream"
+		if creates {
+			kind = "create"
+		}
+		in.sanction(el, budget, kind, "time-budget", "a GPU submit overran its time budget; the GPU grant is revoked")
 		// The GPU still holds the destroyed device's work: keep the turn
 		// until it has left, so the next container's clock starts on an
 		// idle GPU.
@@ -606,7 +634,7 @@ func (in *instance) drain() {
 // rest of its life (even across a restart of the same container, until the
 // engine itself restarts), and reports it to the engine (event and inspect).
 // Every context of the container is lost with the device.
-func (in *instance) sanction(el, budget time.Duration, creates bool) {
+func (in *instance) sanction(el, budget time.Duration, frame, cause, reason string) {
 	in.revoked.Store(true)
 	if in.key != "" {
 		in.m.revoked.Store(in.key, true)
@@ -614,14 +642,10 @@ func (in *instance) sanction(el, budget time.Duration, creates bool) {
 	in.m.record(func(s *Stats) { s.Sanctions++ })
 	in.loseDevice()
 	if in.proc != nil {
-		kind := "stream"
-		if creates {
-			kind = "create"
-		}
 		in.proc.Emit("gpu", "sanction", map[string]string{
-			"reason":    "a GPU submit overran its time budget; the GPU grant is revoked",
+			"reason":    reason,
 			"submit_ms": strconv.FormatInt(el.Milliseconds(), 10), "budget_ms": strconv.FormatInt(budget.Milliseconds(), 10),
-			"frame": kind,
+			"frame": frame, "cause": cause,
 		})
 	}
 }
@@ -682,7 +706,38 @@ func (in *instance) runFrame(c *gctx, msgs []wgpubatch.Message, lim wgpubatch.Li
 	}
 	c.peak.Store(c.c.PeakInvocations())
 	c.peakDispatch.Store(c.c.PeakDispatchInvocations())
+	in.recordLoop(c)
 	return Success
+}
+
+// loopStats are layer 4's counters of one backend.
+type loopStats struct {
+	modules, rewritten, fallbacks int
+	spent                         time.Duration
+}
+
+// recordLoop adds to the module's Stats what layer 4 did since the last frame
+// of the context (the backend, if it has a loop budget, keeps the totals).
+func (in *instance) recordLoop(c *gctx) {
+	lb, ok := c.be.(interface {
+		LoopBudgetStats() (modules, rewritten, fallbacks int, spent time.Duration)
+	})
+	if !ok {
+		return
+	}
+	var now loopStats
+	now.modules, now.rewritten, now.fallbacks, now.spent = lb.LoopBudgetStats()
+	d := loopStats{now.modules - c.loop.modules, now.rewritten - c.loop.rewritten, now.fallbacks - c.loop.fallbacks, now.spent - c.loop.spent}
+	c.loop = now
+	if d == (loopStats{}) {
+		return
+	}
+	in.m.record(func(s *Stats) {
+		s.LoopModules += int64(d.modules)
+		s.LoopRewritten += int64(d.rewritten)
+		s.LoopFallbacks += int64(d.fallbacks)
+		s.LoopSpent += d.spent
+	})
 }
 
 // setError records the message of a failure for last_error.
@@ -725,6 +780,10 @@ func (in *instance) lastError(h, buf, n, out uint32, m wasi.Memory) wasi.Result 
 func errno(err error) Errno {
 	var q *webgpu.QuotaError
 	switch {
+	case errors.Is(err, batch.ErrTruncated):
+		return Truncated
+	case errors.Is(err, batch.ErrReserved):
+		return Reserved
 	case errors.Is(err, batch.ErrInvalid):
 		return InvalidShader
 	case errors.As(err, &q):
