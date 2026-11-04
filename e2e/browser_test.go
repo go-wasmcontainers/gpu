@@ -71,6 +71,13 @@ func serve(t *testing.T, h http.Handler) (port int, reports <-chan string) {
 			io.WriteString(w, "let i = 0; (function tick() { postMessage(i++); if (i < 100) setTimeout(tick, 5); })();")
 			return
 		}
+		if r.URL.Path == "/__sab-worker.js" {
+			w.Header().Set("Content-Type", "text/javascript")
+			w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+			w.Header().Set("Cross-Origin-Embedder-Policy", "require-corp")
+			io.WriteString(w, `onmessage = (e) => { const d = e.data; const sab = d instanceof SharedArrayBuffer; const a = sab ? new Uint8Array(d) : d; a[0] = 42; postMessage((sab || a.buffer instanceof SharedArrayBuffer) ? "shared" : "copied"); };`)
+			return
+		}
 		if r.URL.Path == "/__probe.html" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")

@@ -42,6 +42,43 @@ const probePage = `<!doctype html><meta charset=utf-8><title>capabilities</title
     if (!a) a = await navigator.gpu.requestAdapter({forceFallbackAdapter: true});
     add("navigator.gpu.requestAdapter returns an adapter", a !== null && a !== undefined);
   } catch (e) { add("navigator.gpu.requestAdapter returns an adapter", false, String(e)); }
+  // SharedArrayBuffer details, each its own named case.
+  t("Atomics.wait/notify exist and notify works", () => {
+    const i = new Int32Array(new SharedArrayBuffer(16));
+    return typeof Atomics.wait === "function" && typeof Atomics.notify === "function" && Atomics.notify(i, 0, 1) === 0 && Atomics.add(i, 1, 5) === 0 && Atomics.load(i, 1) === 5;
+  });
+  t("Uint8Array/Int32Array/DataView over the same SAB agree", () => {
+    const sab = new SharedArrayBuffer(16), u8 = new Uint8Array(sab), i32 = new Int32Array(sab), dv = new DataView(sab);
+    u8[0] = 1; u8[1] = 2; u8[2] = 3; u8[3] = 4;
+    if (i32[0] !== 0x04030201) throw new Error("Int32Array read " + i32[0].toString(16));
+    if (dv.getUint32(0, true) !== 0x04030201) throw new Error("DataView read " + dv.getUint32(0, true).toString(16));
+    dv.setUint8(8, 9);
+    if (u8[8] !== 9) throw new Error("write through DataView not seen by Uint8Array");
+    return u8.buffer === sab && i32.buffer === sab && dv.buffer === sab;
+  });
+  // Posting a SAB (or a view of one) to a worker: it must arrive shared (the
+  // worker's write is seen here), not copied. Bounded by a 15 s timer.
+  const post = (what) => new Promise((resolve) => {
+    if (typeof Worker !== "function" || typeof SharedArrayBuffer !== "function") return resolve("no Worker or SharedArrayBuffer");
+    const sab = new SharedArrayBuffer(16), view = new Uint8Array(sab);
+    let w;
+    const timer = setTimeout(() => { try { w.terminate(); } catch (e) {} resolve("no reply from the worker in 15 s"); }, 15000);
+    try {
+      w = new Worker("/__sab-worker.js");
+      w.onmessage = (e) => {
+        clearTimeout(timer);
+        try { w.terminate(); } catch (x) {}
+        if (e.data !== "shared") return resolve("the worker received a copy (" + e.data + "), not shared memory");
+        resolve(view[0] === 42 ? "" : "the worker wrote 42 but this side reads " + view[0]);
+      };
+      w.onerror = (e) => { clearTimeout(timer); resolve("worker error: " + (e && e.message)); };
+      w.postMessage(what === "sab" ? sab : view);
+    } catch (e) { clearTimeout(timer); resolve("postMessage failed: " + e); }
+  });
+  for (const [name, what] of [["posting a SharedArrayBuffer shares it", "sab"], ["posting a Uint8Array view of a SAB shares it", "view"]]) {
+    const why = await post(what);
+    add(name, why === "", why);
+  }
   // A Worker streams 100 unsolicited messages (setTimeout-spaced) while the
   // main thread's setInterval counter runs: pass only if all arrive in order
   // through onmessage and the counter advanced meanwhile. Bounded by a 15 s
@@ -116,7 +153,7 @@ type engineRun struct {
 }
 
 // renderInEngine runs e2e/webengine (its own module, pinned to
-// go-webengine/engine v0.27.1) on url.
+// go-webengine/engine v0.28.1) on url.
 func renderInEngine(t *testing.T, url string, timeout time.Duration) engineRun {
 	t.Helper()
 	cmd := exec.Command("go", "run", ".", "-url", url, "-timeout", timeout.String())
@@ -170,7 +207,7 @@ func runWebengine(t *testing.T, port int, reports <-chan string, url string, tim
 		pr.Report = string(b)
 	}
 	if len(pr.Budget) > 0 && pr.Report != "" {
-		// The engine stopped work on a cap (go-webengine v0.27.1 logs it): a
+		// The engine stopped work on a cap (go-webengine v0.28.1 logs it): a
 		// named failure of its own.
 		var c capReport
 		if err := json.Unmarshal([]byte(pr.Report), &c); err != nil {
