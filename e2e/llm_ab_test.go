@@ -59,7 +59,7 @@ func TestLLMAB(t *testing.T) {
 					if sk != "" && sk != "none" {
 						a = append(a, "-skip", sk)
 					}
-					rep := runLLMCases(t, e, []engineCase{{Name: "bench", Module: "generate.wasm", GPU: true, GPUMemory: 512 << 20, Args: a}}, launchFallbackArgs())
+					rep := runLLMCases(t, e, []engineCase{{Name: "bench", Module: "generate.wasm", GPU: true, GPUMemory: llmGPUMemory(), Args: a}}, launchFallbackArgs())
 					res := rep.Results[0]
 					if res.Exit != 0 {
 						t.Fatalf("exit %d %s\n%s%s", res.Exit, res.Error, res.Stdout, res.Stderr)
@@ -89,8 +89,16 @@ func TestLLMAB(t *testing.T) {
 // oracle prompts do not reach).
 func TestLLMCheckLong(t *testing.T) {
 	env := needLLM(t)
-	prompt := strings.Repeat("The quick brown fox jumps over the lazy dog while the old clock keeps ticking. ", 11)
-	rep := runLLMCases(t, env, []engineCase{{Name: "check", Module: "generate.wasm", GPU: true, GPUMemory: 512 << 20,
+	// 11 repeats are about 190 tokens; LLM_LONG_REPEATS shortens it for a model
+	// whose CPU path is slow (Qwen2.5-0.5B: 0.6 s per token, and a container is
+	// killed after about two minutes): 8 repeats are 137 tokens, still two
+	// prompt chunks of 64 and three attention chunks.
+	reps := 11
+	if v, _ := strconv.Atoi(os.Getenv("LLM_LONG_REPEATS")); v > 0 {
+		reps = v
+	}
+	prompt := strings.Repeat("The quick brown fox jumps over the lazy dog while the old clock keeps ticking. ", reps)
+	rep := runLLMCases(t, env, []engineCase{{Name: "check", Module: "generate.wasm", GPU: true, GPUMemory: llmGPUMemory(),
 		Args: []string{"check", "-n", "16", "-ctx", "512", prompt}}}, launchFallbackArgs())
 	res := rep.Results[0]
 	t.Logf("exit %d\n%s%s", res.Exit, res.Stdout, res.Stderr)

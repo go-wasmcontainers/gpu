@@ -34,7 +34,43 @@ import (
 //
 // and skip cleanly without them.
 
-const llmModelFile = "SmolLM2-135M-Instruct-Q4_0.gguf"
+const llmDefaultModelFile = "SmolLM2-135M-Instruct-Q4_0.gguf"
+
+// The model under test: LLM_MODEL_FILE (the GGUF in LLM_MODELS), LLM_REGISTRY_NAME
+// (the name under /models), LLM_ORACLE_FILE (testdata/ of the llm repository)
+// and LLM_GPU_MEMORY (MiB) default to SmolLM2-135M Q4_0, so the SmolLM2 runs
+// are unchanged; set them for another model, e.g. Qwen2.5-0.5B:
+//
+//	LLM_MODEL_FILE=qwen2.5-0.5b-instruct-q4_0.gguf LLM_REGISTRY_NAME=qwen2.5-0.5b-instruct-q4_0
+//	LLM_ORACLE_FILE=oracle-qwen2.5-0.5b-dequant-f32.json LLM_GPU_MEMORY=1024
+func llmModelFile() string {
+	if v := os.Getenv("LLM_MODEL_FILE"); v != "" {
+		return v
+	}
+	return llmDefaultModelFile
+}
+
+func llmRegistryName() string {
+	if v := os.Getenv("LLM_REGISTRY_NAME"); v != "" {
+		return v
+	}
+	return "smollm2-135m-instruct-q4_0"
+}
+
+func llmOracleFile() string {
+	if v := os.Getenv("LLM_ORACLE_FILE"); v != "" {
+		return v
+	}
+	return "oracle-smollm2-135m-dequant-f32.json"
+}
+
+// llmGPUMemory is the container's GPU memory grant, in bytes.
+func llmGPUMemory() int64 {
+	if v, _ := strconv.Atoi(os.Getenv("LLM_GPU_MEMORY")); v > 0 {
+		return int64(v) << 20
+	}
+	return 512 << 20
+}
 
 type llmEnv struct {
 	model string
@@ -49,7 +85,7 @@ func needLLM(t *testing.T) llmEnv {
 	if dir == "" || repo == "" {
 		t.Skip("LLM_MODELS and LLM_REPO are not set")
 	}
-	p := filepath.Join(dir, llmModelFile)
+	p := filepath.Join(dir, llmModelFile())
 	f, err := os.Open(p)
 	if err != nil {
 		t.Skip(err)
@@ -93,7 +129,10 @@ func runLLMCases(t *testing.T, env llmEnv, cases []engineCase, extraArgs []strin
 	}
 	origin := fmt.Sprintf("http://localhost:%d", ln.Addr().(*net.TCPAddr).Port)
 	for i := range cases {
-		cases[i].Models = []engineModel{{Name: "smollm2-135m-instruct-q4_0", URL: origin + "/model.gguf", Size: env.size, SHA256: env.sum}}
+		cases[i].Models = []engineModel{{Name: llmRegistryName(), URL: origin + "/model.gguf", Size: env.size, SHA256: env.sum}}
+		if n := os.Getenv("LLM_REGISTRY_NAME"); n != "" && len(cases[i].Args) > 0 { // a model other than the default of the example
+			cases[i].Args = append([]string{cases[i].Args[0], "-model", "/models/" + n + ".gguf"}, cases[i].Args[1:]...)
+		}
 	}
 	cs, _ := json.Marshal(cases)
 	files := map[string][]byte{"index.html": []byte(enginePage), "engine.js": []byte(engineWorker), "wasm_exec.js": wasmExec,
@@ -175,7 +214,7 @@ type oracleRecord struct {
 }
 
 func loadOracle(t *testing.T, env llmEnv) []oracleRecord {
-	b, err := os.ReadFile(filepath.Join(env.repo, "testdata", "oracle-smollm2-135m-dequant-f32.json"))
+	b, err := os.ReadFile(filepath.Join(env.repo, "testdata", llmOracleFile()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,10 +263,10 @@ func TestLLMOracle(t *testing.T) {
 	oracle := loadOracle(t, env)
 	var cases []engineCase
 	for i, o := range oracle {
-		cases = append(cases, engineCase{Name: fmt.Sprintf("run%d", i), Module: "generate.wasm", GPU: true, GPUMemory: 512 << 20,
+		cases = append(cases, engineCase{Name: fmt.Sprintf("run%d", i), Module: "generate.wasm", GPU: true, GPUMemory: llmGPUMemory(),
 			Args: []string{"run", "-n", "32", o.Prompt}})
 	}
-	cases = append(cases, engineCase{Name: "check", Module: "generate.wasm", GPU: true, GPUMemory: 512 << 20,
+	cases = append(cases, engineCase{Name: "check", Module: "generate.wasm", GPU: true, GPUMemory: llmGPUMemory(),
 		Args: []string{"check", "-n", "16", oracle[0].Prompt}})
 	rep := runLLMCases(t, env, cases, launchFallbackArgs())
 	requireGPU(t, rep)
@@ -282,7 +321,7 @@ func TestLLMOracle(t *testing.T) {
 // the CPU path's (a debugging aid; it fails only if the container fails).
 func TestLLMTrace(t *testing.T) {
 	env := needLLM(t)
-	rep := runLLMCases(t, env, []engineCase{{Name: "trace", Module: "generate.wasm", GPU: true, GPUMemory: 512 << 20,
+	rep := runLLMCases(t, env, []engineCase{{Name: "trace", Module: "generate.wasm", GPU: true, GPUMemory: llmGPUMemory(),
 		Args: []string{"trace", "The capital of France is"}}}, launchFallbackArgs())
 	r := rep.Results[0]
 	t.Logf("trace (%.0f ms): exit %d\n%s%s", r.Ms, r.Exit, r.Stdout, r.Stderr)
@@ -398,7 +437,7 @@ func TestLLMBench(t *testing.T) {
 	var gpuPre, gpuDec, cpuPre, cpuDec []float64
 	maxLoad := 0.0
 	for i := 0; i < rounds; i++ {
-		rep := runLLMCases(t, env, []engineCase{{Name: "bench", Module: "generate.wasm", GPU: true, GPUMemory: 512 << 20,
+		rep := runLLMCases(t, env, []engineCase{{Name: "bench", Module: "generate.wasm", GPU: true, GPUMemory: llmGPUMemory(),
 			Args: []string{"bench", "-rounds", "2", "-p", "128", "-n", "128", "-ctx", "512"}}}, launchFallbackArgs())
 		r := rep.Results[0]
 		if r.Exit != 0 {
@@ -445,7 +484,7 @@ func TestLLMDecodeBreakdown(t *testing.T) {
 	env := needLLM(t)
 	var cases []engineCase
 	for _, p := range []string{"8", "128"} {
-		cases = append(cases, engineCase{Name: "p" + p, Module: "generate.wasm", GPU: true, GPUMemory: 512 << 20,
+		cases = append(cases, engineCase{Name: "p" + p, Module: "generate.wasm", GPU: true, GPUMemory: llmGPUMemory(),
 			Args: []string{"bench", "-rounds", "2", "-p", p, "-n", "64", "-ctx", "512"}})
 	}
 	rep := runLLMCases(t, env, cases, launchFallbackArgs())
