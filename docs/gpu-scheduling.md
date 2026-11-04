@@ -47,7 +47,8 @@ work running (go-wasmcontainers/gpu#26: Chromium 151 started the next
 container 3.7 s late; Firefox 159's next container hit its own 2 s deadline).
 
 **Conclusion: no way to cancel submitted work exists, so no design can bound
-the first stall by cancellation.** Layers 1 to 3 below bound everything else.
+the first stall by cancellation.** Layers 1 to 3 bound everything else; layer 4
+bounds the first stall by not letting a loop run long enough to need cancelling.
 
 ## Layers
 
@@ -120,20 +121,75 @@ not a sanction. `FuzzCheckInvocations` covers the check. A
 `DispatchIndirect` takes its counts from GPU memory and is not counted; only
 the time budget bounds it.
 
-## What this does not do: the first stall (layer 4, open)
+### 4. Loop budget: the first stall, bounded (layer 4)
 
-Nothing above bounds the first stall. A hostile shader that fits the quota can
-loop for seconds; the host sees it only when the budget expires, destroys the
-device, and the GPU runs the rest of it anyway. Every other container waits
-for the whole shader: **the victim's worst-case added latency is the hostile
-shader's remaining length, not the budget** (measured below). The only way to
-bound it is to rewrite the WGSL before it is compiled, so that every loop
-carries an iteration counter and exits at a bound (loop instrumentation). That
-is layer 4, out of scope here, and open: it needs a WGSL parser and a rewriter
-that preserve semantics, and it still cannot bound a loop-free but huge
-dispatch (layer 3 does that).
+Nothing above bounds the first stall: a hostile shader that fits the quota can
+loop for seconds, the host sees it only when the budget expires, and the GPU
+runs the rest of it anyway. Layer 4 does not cancel; it makes the loop stop by
+itself. Every guest WGSL module with a compute entry point is rewritten before
+`createShaderModule` with go-gfx/wgsl `transform.LoopBudget` (v0.2.0, applied
+in `go-gfx/webgpu/batch`, `DeviceBackend.SetLoopBudget`): each outermost loop
+nest of each function activation counts its iterations and, past the budget,
+stores 1 into a host-owned flag and leaves the loop.
 
-## Acceptance measurements
+- **Parse only.** The host calls `wgsl.Parse` and the transform, never
+  `Validate` (its checker still has false rejects). WGSL that does not parse
+  reaches the browser unchanged and the browser reports its own error: nothing
+  is refused by the host. Such a shader is bounded by layer 2 only. If the
+  browser refuses the rewritten text but accepts the original, the original is
+  kept and counted (`Stats.LoopFallbacks`, zero in every run below).
+- **Budget per dispatch.** `B = Work / invocations` of the dispatch (workgroup
+  counts times 256), rounded down to a power of 4, at least 1024 and at most
+  2^24 (`Browser.LoopWork`, default 2^36, `LoopMin`). A big dispatch gets short
+  loops, a small one long loops; the cap exists because a one-workgroup
+  dispatch would otherwise get billions of serial iterations (the first
+  Firefox run of the hostile test found it). A `DispatchIndirect` is budgeted
+  as 2^26 invocations. The budget is a `var<uniform> u32` bound with a dynamic
+  offset into a host buffer; no state is written per dispatch.
+- **Reserved slot.** Bind group 3 (`maxBindGroups - 1`; the device asks for no
+  raised limit) belongs to the host: binding 0 is the flag, binding 1 the
+  budget. A pipeline layout with more than 3 bind group layouts, a WGSL module
+  with a binding in `@group(3)`, or a `SetBindGroup` of index 3 or more is
+  refused with errno **13, *reserved*** (the context is lost, the grant is not
+  revoked). The host pads the layouts of rewritten pipelines with empty groups
+  and sets groups 1 to 3 itself, once per pass, and the flag's copy rides the
+  stream's own submit.
+- **Truncation.** After a stream that ran a rewritten pipeline the host reads
+  the flag. If it is set the submit answers errno **14, *truncated*** (a
+  truncated result is never returned), the context is lost, and the container is
+  sanctioned exactly like a timeout: grant revoked, `gpu-sanction` event with
+  `cause=loop-budget` (`cause=time-budget` otherwise). There is nothing to
+  drain: the work is already off the GPU.
+- **Not covered.** Straight-line code (bounded already) and the dispatch size
+  (layer 3). A module that also has a `@vertex` entry is not rewritten (a
+  vertex stage cannot write storage). The older `wasi_webgpu` module (no
+  scheduler, no budget) and the host's own wasi-nn kernels do not go through
+  `gpubatch` and are not rewritten.
+
+**Choosing `Work` from measurement.** `internal/cmd/loopsweep`
+runs the LLM tests (`TestLLMOracle`, `TestLLMTrace`, `TestLLMShaders`:
+SmolLM2-135M Q4_0, 50 shader modules, largest dispatch 12,582,912 invocations,
+largest stream 321,212,416) with `Work = 2^k` and the floor at 1, so nothing masks
+a truncation. They pass with zero truncations down to **2^28** and fail at
+2^27: the most expensive legitimate dispatch (invocations times loop
+iterations) is between 1.3 and 2.7 x 10^8. The default **2^36 is 256 times the
+smallest passing work**; every other e2e (batch, engine, quota, the wasi-webgpu
+backend) has zero truncations (the batchcompute shaders have no loops). The hostile shader at the largest dispatch the
+quota allows (about 6.7 x 10^7 invocations, B = 1024) is cut after 26 to 37 ms
+in Chromium 151 and 100 ms in Firefox 159 (Apple M4 Max).
+
+**Cost.** Rewriting (parse, transform, print, in the browser's WebAssembly):
+**0.6 ms per module on average** (LLM: 50 modules, 30 ms in all, 35 of them
+rewritten; batch suite: 26 modules, 10 ms in Chromium, 13 to 15 ms in
+Firefox). Per dispatch, the counters and the extra `SetBindGroup`s cost LLM
+decode **about 10 % of its tokens per second** (Chromium 151, SmolLM2-135M Q4_0, 32
+tokens, interleaved off/on, 1-minute load 5 to 6: 248 tok/s without layer 4
+against 223 with, 12 samples each; an earlier 16-sample series gave 260 against
+229). Layer 4 can be turned off (`Browser.NoLoopBudget`, `?noloop=1` in the
+e2e page) for a measurement or a trusted workload; that is a trade, not a
+default.
+
+## Acceptance measurements (layers 1 to 3; layer 4 at the end)
 
 The e2e tests are `TestBatchSanction` (a hostile container whose shader is
 aimed at 3 s, against a victim container submitting every 20 ms for 25 s, in
@@ -183,3 +239,26 @@ start a Safari session at all ("timed out while connecting to a Safari
 instance"), so the run could not be repeated at a low load. It is tracked as an open defect
 (Safari's behaviour after a hung shader), not claimed as working; the Safari
 victim-latency figure is therefore **not measured**.
+
+### Layer 4: the same hostile/victim test, before and after
+
+The same `TestBatchSanction`, same machine (Apple M4 Max, 1-minute load 5 to 6),
+the victim's **worst submit**. *Before* is the control run (no layer 4, budget
+and cap at 60 s: nobody is sanctioned and the victim waits the shader out; shader
+aimed at 4.5 s); *after* is the default (layer 4 on) with the hostile cut and
+revoked:
+
+| run | Chromium 151 before | Chromium 151 after | Firefox 159 before | Firefox 159 after |
+|---|---|---|---|---|
+| combined (creation and dispatch in one frame) | 4,574 ms | **40.8 ms** | 2,176 ms | **277.5 ms** |
+| split (dispatch in a frame of its own) | 3,031 ms (v0.10.0) | **13.2 ms** | 3,176 ms (v0.10.0) | **280.1 ms** |
+
+Firefox's victim median is 177 ms (its 200 ms floor, #25), so its added latency
+is about 100 ms; Chromium's median is 1.2 to 1.4 ms. Both hostile containers
+answer *truncated* (errno 14) once, are revoked (the next `context_create` answers
+*revoked*), the victim is never sanctioned (0 errors), and the engine event
+carries `cause=loop-budget`. Zero truncations and zero fallbacks in every other
+test: on Chromium the whole e2e (`TestBatch*`, `TestContainersOnWebGPU`, `TestLLMOracle`, `TestLLMTrace`, `TestLLMShaders`, `TestLLMDecodeBreakdown`, `TestBrowserCapabilities`, `TestWebGPUBackend`), on
+Firefox the batch tests, `TestBrowserCapabilities` and `TestWebGPUBackend`.
+**Safari is not measured**: automation is disabled on this Mac (safaridriver
+cannot start a session, #32); the Safari acceptance stays open.

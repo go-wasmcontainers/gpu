@@ -47,14 +47,33 @@ type fakeDevice struct {
 	delayN    int           // ... but only the first delayN replays, if positive
 	live      int           // buffers alive
 	features  uint32
+	truncate  bool // each replay answers batch.ErrTruncated (layer 4)
+	plain     bool // the backend has no loop-budget counters
 }
 
 func (d *fakeDevice) Caps() (uint32, wgpubatch.DeviceLimits) {
 	return d.features, wgpubatch.DeviceLimits{MaxStorageBufferBindingSize: 128 << 20, MaxComputeWorkgroupStorageSize: 16384,
 		MaxComputeInvocationsPerWorkgroup: 256, MaxComputeWorkgroupsPerDimension: 65535, MaxStorageBuffersPerShaderStage: 8}
 }
-func (d *fakeDevice) Backend() batch.Backend { return &fakeBackend{d: d, sizes: map[uint32]int64{}} }
-func (d *fakeDevice) Destroy()               { d.mu.Lock(); d.destroyed = true; d.mu.Unlock() }
+func (d *fakeDevice) Backend() batch.Backend {
+	b := &fakeBackend{d: d, sizes: map[uint32]int64{}}
+	if d.plain {
+		return plainBackend{b}
+	}
+	return b
+}
+
+// plainBackend hides the loop-budget counters of fakeBackend.
+type plainBackend struct{ batch.Backend }
+
+// LoopBudgetStats are layer 4's counters: one module, rewritten, per replay,
+// 2 ms each.
+func (b *fakeBackend) LoopBudgetStats() (modules, rewritten, fallbacks int, spent time.Duration) {
+	b.d.mu.Lock()
+	defer b.d.mu.Unlock()
+	return b.d.replays, b.d.replays, 0, time.Duration(b.d.replays) * 2 * time.Millisecond
+}
+func (d *fakeDevice) Destroy() { d.mu.Lock(); d.destroyed = true; d.mu.Unlock() }
 func (d *fakeDevice) snapshot() (replays, live int, destroyed bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -120,8 +139,12 @@ func (b *fakeBackend) Replay(words []uint32, data []byte) error {
 			delay = 0
 		}
 	}
+	truncate := b.d.truncate
 	b.d.mu.Unlock()
 	time.Sleep(delay)
+	if truncate {
+		return batch.ErrTruncated
+	}
 	return nil
 }
 
@@ -561,6 +584,8 @@ func TestErrno(t *testing.T) {
 		{&webgpu.JSError{Op: "x"}, Failed},
 		{&webgpu.GPUError{Kind: "validation"}, Failed},
 		{fmt.Errorf("%w: x", batch.ErrInvalid), InvalidShader},
+		{batch.ErrTruncated, Truncated},
+		{fmt.Errorf("%w: group 3", batch.ErrReserved), Reserved},
 		{webgpu.ErrDestroyed, Failed},
 	} {
 		if got := errno(tc.err); got != tc.want {
@@ -659,5 +684,52 @@ func TestInvalidShaderIsLoud(t *testing.T) {
 	ctx := g.newContext()
 	if e := g.call(fnLastError, uint64(ctx), 100, 8, uint64(len(g.m)-1)); e != Fault {
 		t.Errorf("last_error with the length outside memory: %d", e)
+	}
+}
+
+// Layer 4: a stream whose flag was set answers Truncated, the container is
+// sanctioned like for a timeout (device destroyed, grant revoked), and the
+// module counts it.
+func TestTruncatedIsASanction(t *testing.T) {
+	g := newGuest(t, gpuCaps, func(_ *Module, p *fakeProvider) { p.dev.truncate = true })
+	a, b := g.newContext(), g.newContext()
+	f := bufferFrame(t, 1, 64, webgpu.BufferUsageCopyDst, []uint32{uint32(wire.WriteBuffer), 1, 0, 0, 0, 4}, make([]byte, 4))
+	if e := g.submit(a, f, 4096, 0, 0); e != Truncated {
+		t.Fatalf("errno %d, want Truncated", e)
+	}
+	if _, _, destroyed := g.dev.snapshot(); !destroyed {
+		t.Error("the device was not destroyed")
+	}
+	if e := g.submit(b, bufferFrame(t, 1, 64, webgpu.BufferUsageCopyDst, nil, nil), 4096, 0, 0); e != Revoked {
+		t.Errorf("another context: %d, want Revoked", e)
+	}
+	if s := g.mod.Stats(); s.Truncations != 1 || s.Sanctions != 1 {
+		t.Errorf("stats %+v", s)
+	}
+}
+
+// The loop-budget counters of the backend are added to the module's Stats
+// once per frame, as differences.
+func TestLoopStats(t *testing.T) {
+	g := newGuest(t, gpuCaps, nil)
+	a := g.newContext()
+	f := bufferFrame(t, 1, 64, webgpu.BufferUsageCopyDst, []uint32{uint32(wire.WriteBuffer), 1, 0, 0, 0, 4}, make([]byte, 4))
+	for i := 0; i < 2; i++ {
+		if e := g.submit(a, f, 4096, 0, 0); e != Success {
+			t.Fatalf("errno %d", e)
+		}
+		f = streamFrame(t) // the second frame only streams
+	}
+	if s := g.mod.Stats(); s.LoopModules != 2 || s.LoopRewritten != 2 || s.LoopFallbacks != 0 || s.LoopSpent != 4*time.Millisecond {
+		t.Errorf("stats %+v", s)
+	}
+	// A backend without the counters adds nothing and does not fail.
+	p := newGuest(t, gpuCaps, func(_ *Module, p *fakeProvider) { p.dev.plain = true })
+	c := p.newContext()
+	if e := p.submit(c, bufferFrame(t, 1, 64, webgpu.BufferUsageCopyDst, nil, nil), 4096, 0, 0); e != Success {
+		t.Fatalf("plain backend: errno %d", e)
+	}
+	if s := p.mod.Stats(); s.LoopModules != 0 {
+		t.Errorf("stats %+v", s)
 	}
 }

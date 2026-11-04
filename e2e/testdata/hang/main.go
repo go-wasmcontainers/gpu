@@ -152,8 +152,16 @@ func main() {
 	}
 	iters := uint64(1 << 10)
 	var took time.Duration
+	// With the host's loop budget (layer 4) the doubling ends by itself: a
+	// loop past the budget is cut and the submit answers Truncated. That
+	// submit is the hostile one: it is what the host bounded.
+	var cut error
 	for {
 		took, err = r.submit(iters)
+		if truncated(err) {
+			cut = err
+			break
+		}
 		must(err)
 		if took-lat >= stop || iters >= 1<<31 {
 			break
@@ -182,11 +190,16 @@ func main() {
 	fmt.Printf("dispatch %d x %d workgroups of 64; calibration took %d ms (latency %d ms); %d iterations aim at %.0f ms (split %v)\n",
 		r.gx, r.gy, took.Milliseconds(), lat.Milliseconds(), iters, target, split)
 
-	took, err = r.submit(iters)
+	if cut != nil {
+		err = cut
+	} else {
+		took, err = r.submit(iters)
+	}
 	ms := took.Milliseconds()
 	var e *batchsink.Error
-	ok := errors.As(err, &e) && e.Errno == batchsink.Timeout
-	fmt.Printf("long submit: %v after %d ms (timeout as expected: %v)\n", err, ms, ok)
+	byLoop := errors.As(err, &e) && e.Errno == batchsink.Truncated
+	ok := errors.As(err, &e) && e.Errno == batchsink.Timeout || byLoop
+	fmt.Printf("long submit: %v after %d ms (cut as expected: %v, by the loop budget: %v)\n", err, ms, ok, byLoop)
 	// The device is destroyed: every later call fails, as an error.
 	_, err = r.submit(1)
 	ok2 := err != nil && (errors.Is(err, webgpu.ErrDestroyed) || errors.As(err, &e) && (e.Errno == batchsink.ContextLost || e.Errno == batchsink.Revoked) || strings.Contains(err.Error(), "lost"))
@@ -199,6 +212,12 @@ func main() {
 	if !ok || !ok2 || !ok3 {
 		os.Exit(1)
 	}
+}
+
+// truncated reports whether err is the host's loop-budget cut.
+func truncated(err error) bool {
+	var e *batchsink.Error
+	return errors.As(err, &e) && e.Errno == batchsink.Truncated
 }
 
 func must(err error) {
