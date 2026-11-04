@@ -302,8 +302,10 @@ compared before/after.
 
 Why Firefox took 200 ms: it resolves `onSubmittedWorkDone` and `mapAsync` on
 the tick of a 100 ms timer (`WebGPUParent.cpp` `POLL_TIME_MS = 100`; Bugzilla
-1870699 "Don't poll WebGPU from a timer", assigned, a background-thread
-rewrite is in progress), and the host waited twice (work-done, then map). The
+[1870699](https://bugzilla.mozilla.org/show_bug.cgi?id=1870699) "Don't poll
+WebGPU from a timer", assigned, a background-thread rewrite is in progress; our
+measurements and the kick workaround are in
+[comment 60](https://bugzilla.mozilla.org/show_bug.cgi?id=1870699#c60)), and the host waited twice (work-done, then map). The
 control is `go run ./internal/cmd/ffwait` (a bare page, no engine, also in a
 Worker): every await costs 100 ms, an empty submit as a kick takes it to
 0.3 ms. go-gfx/webgpu v0.12.1 kicks the queue with an empty `submit([])`
