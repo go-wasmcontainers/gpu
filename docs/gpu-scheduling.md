@@ -196,6 +196,14 @@ backend) has zero truncations (the batchcompute shaders have no loops). The host
 quota allows (about 6.7 x 10^7 invocations, B = 1024) is cut after 26 to 37 ms
 in Chromium 151 and 100 ms in Firefox 159 (Apple M4 Max).
 
+**Real shaders, both models.** go-gfx/wgsl v0.3.0 keeps one counter per loop depth: a shared counter
+made an inner strided loop (a per-thread trip count) turn the outer loop's check non-uniform, and the browser
+refused the rewrite of 4 of the 19 Qwen2.5-0.5B modules (a `workgroupBarrier` in the outer loop). The 20
+kernels of go-wasmcontainers/llm (SmolLM2-135M and Qwen2.5-0.5B Q4_0) are now go-gfx/wgsl's real-shader
+corpus, and the host asks the device for one storage buffer more than the default (the flag) so that a
+shader that binds 8 can be rewritten. Chromium 151, both models: **SmolLM2 95 modules, 75 rewritten, 0 refused,
+0 truncations; Qwen2.5-0.5B 95 modules, 75 rewritten, 0 refused, 0 truncations.**
+
 **Cost.** Rewriting (parse, transform, print, in the browser's WebAssembly):
 **0.6 ms per module on average** (LLM: 50 modules, 30 ms in all, 35 of them
 rewritten; batch suite: 26 modules, 10 ms in Chromium, 13 to 15 ms in
