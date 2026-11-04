@@ -26,20 +26,24 @@ import (
 
 type result struct {
 	Report  string   `json:"report"`
+	Partial string   `json:"partial"`
 	Log     []string `json:"log"`
 	Title   string   `json:"title"`
 	Error   string   `json:"error"`
 	Version string   `json:"version"`
 }
 
-const reportPrefix = "__REPORT__"
+const (
+	reportPrefix  = "__REPORT__"
+	partialPrefix = "__PARTIAL__" // the probe's results so far, logged after each item
+)
 
 func main() {
 	url := flag.String("url", "", "page to render")
 	timeout := flag.Duration("timeout", 60*time.Second, "script budget (JSTimeout)")
 	flag.Parse()
 	var res result
-	res.Version = "go-webengine/engine v0.25.0"
+	res.Version = "go-webengine/engine v0.26.0"
 	var mu sync.Mutex
 	e := engine.New()
 	e.EnableDoneSignal = true
@@ -49,6 +53,10 @@ func main() {
 	e.JSLog = func(l string) {
 		mu.Lock()
 		defer mu.Unlock()
+		if i := strings.Index(l, partialPrefix); i >= 0 {
+			res.Partial = l[i+len(partialPrefix):] // the last one wins
+			return
+		}
 		if i := strings.Index(l, reportPrefix); i >= 0 && res.Report == "" {
 			res.Report = l[i+len(reportPrefix):]
 			return

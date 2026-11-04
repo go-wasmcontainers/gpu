@@ -17,7 +17,9 @@ import (
 const probePage = `<!doctype html><meta charset=utf-8><title>capabilities</title><script>
 (async () => {
   const caps = [];
-  const add = (name, ok, detail) => caps.push({name, ok: !!ok, detail: detail || ""});
+  // After each item the results so far go to the console: an engine that
+  // ends the page before the last item completes still yields a list.
+  const add = (name, ok, detail) => { caps.push({name, ok: !!ok, detail: detail || ""}); console.log("__PARTIAL__" + JSON.stringify({caps})); };
   const t = (name, f) => { try { add(name, f()); } catch (e) { add(name, false, String(e)); } };
   t("Worker", () => typeof Worker === "function");
   t("SharedArrayBuffer", () => typeof SharedArrayBuffer === "function");
@@ -40,6 +42,47 @@ const probePage = `<!doctype html><meta charset=utf-8><title>capabilities</title
     if (!a) a = await navigator.gpu.requestAdapter({forceFallbackAdapter: true});
     add("navigator.gpu.requestAdapter returns an adapter", a !== null && a !== undefined);
   } catch (e) { add("navigator.gpu.requestAdapter returns an adapter", false, String(e)); }
+  // A Worker streams 100 unsolicited messages (setTimeout-spaced) while the
+  // main thread's setInterval counter runs: pass only if all arrive in order
+  // through onmessage and the counter advanced meanwhile. Bounded by a 15 s
+  // timer, so a failure names its reason instead of hanging.
+  const stream = (nWorkers) => new Promise((resolve) => {
+    if (typeof Worker !== "function") return resolve("no Worker");
+    const url = "/__stream-worker.js"; // served by the test server
+    let counter = 0, first = -1, last = -1, finished = false;
+    const iv = setInterval(() => { counter++; }, 10);
+    const got = [], workers = [];
+    const finish = (why) => {
+      if (finished) return;
+      finished = true;
+      clearInterval(iv);
+      workers.forEach((w) => { try { w.terminate(); } catch (e) {} });
+      resolve(why);
+    };
+    const timer = setTimeout(() => finish("only " + got.reduce((a, g) => a + g.length, 0) + "/" + (100 * nWorkers) + " messages in 15 s"), 15000);
+    try {
+      for (let k = 0; k < nWorkers; k++) {
+        const w = new Worker(url), mine = [];
+        got.push(mine);
+        w.onmessage = (e) => {
+          if (e.data !== mine.length) return finish("worker " + k + ": message " + mine.length + " arrived as " + e.data + " (out of order)");
+          mine.push(e.data);
+          if (first < 0) first = counter;
+          if (got.every((g) => g.length === 100)) {
+            last = counter;
+            clearTimeout(timer);
+            finish(last > first ? "" : "the main-thread counter did not advance while the workers streamed (blocked main thread)");
+          }
+        };
+        w.onerror = (e) => finish("worker error: " + (e && e.message));
+        workers.push(w);
+      }
+    } catch (e) { finish("new Worker failed: " + e); }
+  });
+  for (const [name, n] of [["worker streams unsolicited messages", 1], ["2 concurrent workers stream unsolicited messages", 2]]) {
+    const why = await stream(n);
+    add(name, why === "", why);
+  }
   window.__report = JSON.stringify({caps});
 })();
 </script>`
@@ -64,6 +107,7 @@ func (c capReport) missing() []string {
 
 type engineRun struct {
 	Report  string   `json:"report"`
+	Partial string   `json:"partial"`
 	Log     []string `json:"log"`
 	Title   string   `json:"title"`
 	Error   string   `json:"error"`
@@ -71,7 +115,7 @@ type engineRun struct {
 }
 
 // renderInEngine runs e2e/webengine (its own module, pinned to
-// go-webengine/engine v0.25.0) on url.
+// go-webengine/engine v0.26.0) on url.
 func renderInEngine(t *testing.T, url string, timeout time.Duration) engineRun {
 	t.Helper()
 	cmd := exec.Command("go", "run", ".", "-url", url, "-timeout", timeout.String())
@@ -99,6 +143,30 @@ func runWebengine(t *testing.T, port int, reports <-chan string, url string, tim
 	probeURL := fmt.Sprintf("http://localhost:%d/__probe.html", port)
 	probing := url == probeURL
 	pr := renderInEngine(t, probeURL, 60*time.Second)
+	if pr.Report == "" && pr.Error == "" && pr.Partial != "" {
+		// The engine ended the page before the probe's last items completed
+		// (it does not deliver a worker's unsolicited messages, or keep the
+		// page alive for them): report the items done, and name the rest.
+		var c capReport
+		if err := json.Unmarshal([]byte(pr.Partial), &c); err != nil {
+			t.Fatal(err)
+		}
+		have := map[string]bool{}
+		for _, x := range c.Caps {
+			have[x.Name] = true
+		}
+		for _, n := range []string{"worker streams unsolicited messages", "2 concurrent workers stream unsolicited messages"} {
+			if !have[n] {
+				c.Caps = append(c.Caps, struct {
+					Name   string `json:"name"`
+					OK     bool   `json:"ok"`
+					Detail string `json:"detail"`
+				}{n, false, "the engine ended the page before the worker's 100 messages arrived (no report, no error)"})
+			}
+		}
+		b, _ := json.Marshal(c)
+		pr.Report = string(b)
+	}
 	if pr.Error != "" || pr.Report == "" {
 		t.Fatalf("%s: the capability probe did not report: error %q, log %q", pr.Version, pr.Error, pr.Log)
 	}

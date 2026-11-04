@@ -64,6 +64,13 @@ func serve(t *testing.T, h http.Handler) (port int, reports <-chan string) {
 			}
 			return
 		}
+		if r.URL.Path == "/__stream-worker.js" {
+			w.Header().Set("Content-Type", "text/javascript")
+			w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+			w.Header().Set("Cross-Origin-Embedder-Policy", "require-corp")
+			io.WriteString(w, "let i = 0; (function tick() { postMessage(i++); if (i < 100) setTimeout(tick, 5); })();")
+			return
+		}
 		if r.URL.Path == "/__probe.html" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
