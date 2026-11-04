@@ -108,6 +108,7 @@ func (c capReport) missing() []string {
 type engineRun struct {
 	Report  string   `json:"report"`
 	Partial string   `json:"partial"`
+	Budget  []string `json:"budget"`
 	Log     []string `json:"log"`
 	Title   string   `json:"title"`
 	Error   string   `json:"error"`
@@ -115,7 +116,7 @@ type engineRun struct {
 }
 
 // renderInEngine runs e2e/webengine (its own module, pinned to
-// go-webengine/engine v0.27.0) on url.
+// go-webengine/engine v0.27.1) on url.
 func renderInEngine(t *testing.T, url string, timeout time.Duration) engineRun {
 	t.Helper()
 	cmd := exec.Command("go", "run", ".", "-url", url, "-timeout", timeout.String())
@@ -147,6 +148,7 @@ func runWebengine(t *testing.T, port int, reports <-chan string, url string, tim
 		// The engine ended the page before the probe's last items completed
 		// (it does not deliver a worker's unsolicited messages, or keep the
 		// page alive for them): report the items done, and name the rest.
+		t.Logf("%s: no final report or __webengineDone from the probe (the engine stopped at its JSTimeout or earlier); using its partial results", pr.Version)
 		var c capReport
 		if err := json.Unmarshal([]byte(pr.Partial), &c); err != nil {
 			t.Fatal(err)
@@ -167,6 +169,21 @@ func runWebengine(t *testing.T, port int, reports <-chan string, url string, tim
 		b, _ := json.Marshal(c)
 		pr.Report = string(b)
 	}
+	if len(pr.Budget) > 0 && pr.Report != "" {
+		// The engine stopped work on a cap (go-webengine v0.27.1 logs it): a
+		// named failure of its own.
+		var c capReport
+		if err := json.Unmarshal([]byte(pr.Report), &c); err != nil {
+			t.Fatal(err)
+		}
+		c.Caps = append(c.Caps, struct {
+			Name   string `json:"name"`
+			OK     bool   `json:"ok"`
+			Detail string `json:"detail"`
+		}{"timer budget (engine caps not exhausted)", false, strings.Join(pr.Budget, "; ")})
+		b, _ := json.Marshal(c)
+		pr.Report = string(b)
+	}
 	if pr.Error != "" || pr.Report == "" {
 		t.Fatalf("%s: the capability probe did not report: error %q, log %q", pr.Version, pr.Error, pr.Log)
 	}
@@ -183,6 +200,9 @@ func runWebengine(t *testing.T, port int, reports <-chan string, url string, tim
 	r := renderInEngine(t, url, timeout)
 	if r.Error != "" {
 		t.Fatalf("%s: %s\nconsole: %q", r.Version, r.Error, r.Log)
+	}
+	if len(r.Budget) > 0 {
+		t.Fatalf("%s: timer budget exhausted: %s", r.Version, strings.Join(r.Budget, "; "))
 	}
 	if r.Report == "" {
 		t.Fatalf("%s: the page did not call __webengineDone within %v\nconsole: %q", r.Version, timeout, r.Log)
