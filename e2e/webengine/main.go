@@ -43,10 +43,11 @@ func main() {
 	timeout := flag.Duration("timeout", 60*time.Second, "script budget (JSTimeout)")
 	flag.Parse()
 	var res result
-	res.Version = "go-webengine/engine v0.26.0"
+	res.Version = "go-webengine/engine v0.27.0"
 	var mu sync.Mutex
 	e := engine.New()
 	e.EnableDoneSignal = true
+	e.EnableWorkerStreaming = true // a live loop for a worker's unsolicited messages (v0.27.0)
 	e.JSTimeout = *timeout
 	e.MaxWasmModuleBytes = 512 << 20
 	e.MaxWasmMemoryBytes = 2 << 30

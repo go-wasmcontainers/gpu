@@ -115,7 +115,7 @@ type engineRun struct {
 }
 
 // renderInEngine runs e2e/webengine (its own module, pinned to
-// go-webengine/engine v0.26.0) on url.
+// go-webengine/engine v0.27.0) on url.
 func renderInEngine(t *testing.T, url string, timeout time.Duration) engineRun {
 	t.Helper()
 	cmd := exec.Command("go", "run", ".", "-url", url, "-timeout", timeout.String())

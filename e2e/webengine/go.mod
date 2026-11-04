@@ -2,7 +2,7 @@ module github.com/go-wasmcontainers/gpu/e2e/webengine
 
 go 1.27.3
 
-require github.com/go-webengine/engine v0.26.0
+require github.com/go-webengine/engine v0.27.0
 
 require (
 	github.com/andybalholm/brotli v1.2.7 // indirect
