@@ -27,6 +27,9 @@ import (
 type result struct {
 	Report  string   `json:"report"`
 	Partial string   `json:"partial"`
+	// Budget holds the engine's "script cap reached" / "timer-job cap
+	// reached" log lines.
+	Budget []string `json:"budget"`
 	Log     []string `json:"log"`
 	Title   string   `json:"title"`
 	Error   string   `json:"error"`
@@ -43,17 +46,20 @@ func main() {
 	timeout := flag.Duration("timeout", 60*time.Second, "script budget (JSTimeout)")
 	flag.Parse()
 	var res result
-	res.Version = "go-webengine/engine v0.27.0"
+	res.Version = "go-webengine/engine v0.27.1"
 	var mu sync.Mutex
 	e := engine.New()
 	e.EnableDoneSignal = true
-	e.EnableWorkerStreaming = true // a live loop for a worker's unsolicited messages (v0.27.0)
+	e.EnableWorkerStreaming = true // a live loop for a worker's unsolicited messages (v0.27.1)
 	e.JSTimeout = *timeout
 	e.MaxWasmModuleBytes = 512 << 20
 	e.MaxWasmMemoryBytes = 2 << 30
 	e.JSLog = func(l string) {
 		mu.Lock()
 		defer mu.Unlock()
+		if strings.Contains(l, "cap reached") { // v0.27.1: maxScripts / maxTimerJobs stopped work
+			res.Budget = append(res.Budget, l)
+		}
 		if i := strings.Index(l, partialPrefix); i >= 0 {
 			res.Partial = l[i+len(partialPrefix):] // the last one wins
 			return
