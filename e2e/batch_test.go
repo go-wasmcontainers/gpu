@@ -308,17 +308,6 @@ func skipSoft(t *testing.T, rep engineReport) {
 	}
 }
 
-// skipSoft skips the test on a software adapter: the loop budget's work is
-// per GPU (docs/gpu-scheduling.md), and SwiftShader is about a thousand times
-// slower than the default work assumes, so the hostile shader is cut by the
-// 2 s watchdog instead and the message differs.
-func skipSoft(t *testing.T, rep engineReport) {
-	t.Helper()
-	if a := rep.Adapter; a.Fallback || strings.Contains(strings.ToLower(a.Architecture+a.Vendor), "swiftshader") {
-		t.Skip("software adapter: the default loop-budget work is sized for a GPU")
-	}
-}
-
 // loopBudgetOn is whether the run has layer 4 on (the default); the A/B
 // measurements and the pre-layer-4 baseline set GPU_E2E_NO_LOOP_BUDGET=1.
 func loopBudgetOn() bool { return os.Getenv("GPU_E2E_NO_LOOP_BUDGET") != "1" }
@@ -525,7 +514,6 @@ func TestLoopBudgetWasiWebGPU(t *testing.T) {
 	rep := runBatchCasesRaw(t, []engineCase{{Name: "hangwasi", Module: "hangwasi.wasm", GPU: true}}, launchFallbackArgs(), pageQuery(0, 0))
 	requireGPU(t, rep)
 	skipSoft(t, rep)
-	skipSoft(t, rep)
 	r := rep.Results[0]
 	t.Logf("%s (%.0f ms): exit %d (%s)\n%s%s", r.Name, r.Ms, r.Exit, r.Error, r.Stdout, r.Stderr)
 	if r.Exit == 0 || strings.Contains(r.Stdout, "NOT CUT") || !strings.Contains(r.Error+r.Stderr, "loop budget") {
@@ -546,7 +534,6 @@ func TestLoopBudgetWasiNN(t *testing.T) {
 	mnist := []engineCase{{Name: "mnist-gpu", Module: "mnist.wasm", Args: []string{"gpu"}, GPU: true}}
 	ok := runBatchCasesRaw(t, mnist, launchFallbackArgs(), pageQuery(0, 0))
 	requireGPU(t, ok)
-	skipSoft(t, ok)
 	skipSoft(t, ok)
 	if r := ok.Results[0]; r.Exit != 0 || !strings.Contains(r.Stdout, "digit 7") {
 		t.Errorf("default work: exit %d (%s), stdout %q", r.Exit, r.Error, r.Stdout)
