@@ -35,6 +35,13 @@ const reportPoster = `<script>
 const __poll = setInterval(() => {
   if (window.__report === undefined) return;
   clearInterval(__poll);
+  // go-webengine: the report goes through the console and the done signal
+  // (Engine.EnableDoneSignal); elsewhere, through a POST.
+  if (typeof __webengineDone === "function") {
+    console.log("__REPORT__" + window.__report);
+    __webengineDone(window.__report);
+    return;
+  }
   fetch("/__report", {method: "POST", body: window.__report});
 }, 200);
 </script>`
@@ -57,6 +64,13 @@ func serve(t *testing.T, h http.Handler) (port int, reports <-chan string) {
 			}
 			return
 		}
+		if r.URL.Path == "/__probe.html" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+			w.Header().Set("Cross-Origin-Embedder-Policy", "require-corp")
+			io.WriteString(w, probePage+reportPoster)
+			return
+		}
 		h.ServeHTTP(w, r)
 	})}
 	go srv.Serve(ln)
@@ -69,8 +83,16 @@ func serve(t *testing.T, h http.Handler) (port int, reports <-chan string) {
 // Chromium flags (ignored by Firefox).
 func fetchReport(t *testing.T, port int, reports <-chan string, query string, launch []string, timeout time.Duration) (report, version string) {
 	t.Helper()
-	url := fmt.Sprintf("http://localhost:%d/index.html%s", port, query)
+	return fetchPage(t, port, reports, "/index.html"+query, launch, timeout)
+}
+
+// fetchPage is fetchReport for any path of the page server.
+func fetchPage(t *testing.T, port int, reports <-chan string, path string, launch []string, timeout time.Duration) (report, version string) {
+	t.Helper()
+	url := fmt.Sprintf("http://localhost:%d%s", port, path)
 	switch browserName() {
+	case "webengine":
+		return runWebengine(t, port, reports, url, timeout)
 	case "firefox":
 		return runFirefox(t, url, reports, timeout)
 	case "safari":

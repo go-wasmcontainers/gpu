@@ -198,6 +198,30 @@ jobs:
           cat "$RUNNER_TEMP/e2e.log"
           exit $status
 
+  # go-webengine (pure-Go engine of the go-webengine org, engine v0.25.0,
+  # pinned in e2e/webengine/go.mod, a module of its own). NON-BLOCKING and
+  # EXPECTED RED until go-webengine M3 (Workers, SAB/Atomics, COOP/COEP) and
+  # M5 (navigator.gpu): every test fails naming the missing capabilities, and
+  # the run's summary lists them.
+  webgpu-webengine:
+    name: go-webengine e2e (expected red until M3+M5)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version: '1.27.3' }
+      - name: go test -tags e2e (go-webengine)
+        shell: bash
+        env:
+          GPU_E2E_BROWSER: webengine
+        run: |
+          status=0
+          go test -tags e2e -count=1 -v -timeout 15m -run 'TestBrowserCapabilities|TestBatch|TestWebGPUBackend' ./e2e/ > "$RUNNER_TEMP/e2e.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/e2e.log"
+          exit $status
+
   # There is no Safari lane: probed on PR 29, the GitHub macOS images' Safari
   # offers no WebGPU (they are virtual machines, which WebKit excludes), see
   # the README's browser support table. Run it locally:
