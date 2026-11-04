@@ -162,7 +162,7 @@ func runLLMCases(t *testing.T, env llmEnv, cases []engineCase, extraArgs []strin
 	return rep
 }
 
-// oracleRecord is testdata/oracle-smollm2-135m-q4_0.json of go-wasmcontainers/llm:
+// oracleRecord is testdata/oracle-smollm2-135m-dequant-f32.json of go-wasmcontainers/llm:
 // llama.cpp's greedy tokens and top-10 log-probabilities per step.
 type oracleRecord struct {
 	Prompt    string  `json:"prompt"`
@@ -175,7 +175,7 @@ type oracleRecord struct {
 }
 
 func loadOracle(t *testing.T, env llmEnv) []oracleRecord {
-	b, err := os.ReadFile(filepath.Join(env.repo, "testdata", "oracle-smollm2-135m-q4_0.json"))
+	b, err := os.ReadFile(filepath.Join(env.repo, "testdata", "oracle-smollm2-135m-dequant-f32.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,8 +208,11 @@ func intsAfter(out, key string) []int32 {
 // compiler may fuse multiply-adds and exp() differs by a few ulp.
 const (
 	gpuCPULogitRel = 1e-3 // max |gpu-cpu| over the logits, relative to max |logit|
-	llamaNearTie   = 0.25 // nats: a token differing from llama.cpp's is accepted only at a gap this small
-	llamaMinEqual  = 6
+	// A token differing from the f32 reference is accepted only at a gap of
+	// llama.cpp's own log-probabilities this small (on Apple Metal none
+	// differs; another vendor's rounding can flip only an almost exact tie).
+	llamaNearTie  = 1e-3
+	llamaMinEqual = 0
 )
 
 // TestLLMOracle: SmolLM2-135M Q4_0 generated on the GPU in a container, from a
