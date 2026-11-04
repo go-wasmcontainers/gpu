@@ -58,6 +58,7 @@ const (
 	InvalidShader   Errno = 11 // WGSL that does not compile, or an object WebGPU rejects; the context is lost, Error.Msg says why
 	Revoked         Errno = 12 // an earlier submit overran its budget: no GPU for the rest of the container's life
 	Reserved        Errno = 13 // the guest used the bind group the host reserves for its loop budget (group 3); the context is lost
+	Unbounded       Errno = 15 // the host cannot bound the module's loops, so it did not run it; the context is lost, the grant is kept
 	Truncated       Errno = 14 // a shader hit the host's loop budget and was cut: its results are partial; the context is lost and the grant revoked
 )
 
@@ -66,7 +67,8 @@ var errnoNames = [...]string{"success", "invalid argument", "denied (the contain
 	"context lost", "timeout (a submit overran its GPU time budget; the GPU grant is revoked)", "fault", "failed",
 	"invalid shader or object (the GPU refused it)", "revoked (an earlier submit overran its GPU time budget)",
 	"reserved (the guest used bind group 3, which the host keeps for its loop budget)",
-	"truncated (a shader hit the host's loop budget and was cut: its results are partial; the GPU grant is revoked)"}
+	"truncated (a shader hit the host's loop budget and was cut: its results are partial; the GPU grant is revoked)",
+	"unbounded (the host cannot bound the shader's loops, so it did not run it)"}
 
 // Error is a host error.
 type Error struct {

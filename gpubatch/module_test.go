@@ -68,7 +68,7 @@ type plainBackend struct{ batch.Backend }
 
 // LoopBudgetStats are layer 4's counters: one module, rewritten, per replay,
 // 2 ms each.
-func (b *fakeBackend) LoopBudgetStats() (modules, rewritten, fallbacks int, spent time.Duration) {
+func (b *fakeBackend) LoopBudgetStats() (modules, rewritten, refused int, spent time.Duration) {
 	b.d.mu.Lock()
 	defer b.d.mu.Unlock()
 	return b.d.replays, b.d.replays, 0, time.Duration(b.d.replays) * 2 * time.Millisecond
@@ -162,11 +162,14 @@ func (b *fakeBackend) Close() {
 }
 
 type fakeProvider struct {
+	loss  time.Time // when the browser last destroyed a device (LossWatcher)
 	dev   *fakeDevice
 	err   error
 	opens int
 	mem   int64
 }
+
+func (p *fakeProvider) LastBrowserLoss() time.Time { return p.loss }
 
 func (p *fakeProvider) Open(memory int64) (Device, error) {
 	p.opens++
@@ -720,7 +723,7 @@ func TestLoopStats(t *testing.T) {
 		}
 		f = streamFrame(t) // the second frame only streams
 	}
-	if s := g.mod.Stats(); s.LoopModules != 2 || s.LoopRewritten != 2 || s.LoopFallbacks != 0 || s.LoopSpent != 4*time.Millisecond {
+	if s := g.mod.Stats(); s.LoopModules != 2 || s.LoopRewritten != 2 || s.LoopRefused != 0 || s.LoopSpent != 4*time.Millisecond {
 		t.Errorf("stats %+v", s)
 	}
 	// A backend without the counters adds nothing and does not fail.
@@ -731,5 +734,38 @@ func TestLoopStats(t *testing.T) {
 	}
 	if s := p.mod.Stats(); s.LoopModules != 0 {
 		t.Errorf("stats %+v", s)
+	}
+}
+
+// A submit that never completes because the browser destroyed ANOTHER
+// device is not an overrun: no sanction, no revocation; the device is reset
+// and the guest answered ContextLost, then opens a new context (#32).
+func TestCollateralLossIsNotASanction(t *testing.T) {
+	g := newGuest(t, gpuCaps, func(m *Module, p *fakeProvider) {
+		m.Limits.GPUTime, m.Limits.Budget = 60*time.Millisecond, 60*time.Millisecond
+		p.dev.delay, p.dev.delayN = 400*time.Millisecond, 1
+		p.loss = time.Now() // another device was lost by the browser just now
+	})
+	a := g.newContext()
+	f := bufferFrame(t, 1, 64, webgpu.BufferUsageCopyDst, []uint32{uint32(wire.WriteBuffer), 1, 0, 0, 0, 4}, make([]byte, 4))
+	if e := g.submit(a, f, 4096, 0, 0); e != ContextLost {
+		t.Fatalf("errno %d, want ContextLost", e)
+	}
+	if s := g.mod.Stats(); s.Sanctions != 0 || s.Resets != 1 {
+		t.Errorf("stats %+v: a collateral loss is a reset, not a sanction", s)
+	}
+	// The grant is kept: a new context works on a new device.
+	b := g.newContext()
+	if e := g.submit(b, bufferFrame(t, 1, 64, webgpu.BufferUsageCopyDst, nil, nil), 4096, 0, 0); e != Success {
+		t.Errorf("after the reset: errno %d", e)
+	}
+	// Without a recent browser loss the same stall IS an overrun.
+	h := newGuest(t, gpuCaps, func(m *Module, p *fakeProvider) {
+		m.Limits.GPUTime, m.Limits.Budget = 60*time.Millisecond, 60*time.Millisecond
+		p.dev.delay = 400 * time.Millisecond
+		p.loss = time.Now().Add(-time.Hour)
+	})
+	if e := h.submit(h.newContext(), f, 4096, 0, 0); e != Timeout {
+		t.Errorf("an old loss: errno %d, want Timeout", e)
 	}
 }

@@ -48,11 +48,18 @@ type report struct {
 
 const page = `<!doctype html><meta charset=utf-8><title>webgpu e2e</title><script>
 const w = new Worker("worker.js" + location.search);
-w.onmessage = (e) => { window.__report = e.data; };
-w.onerror = (e) => { window.__report = JSON.stringify({error: "worker: " + e.message}); };
+w.onmessage = (e) => { if (typeof e.data === "string") window.__report = e.data; };
+// A worker error must not replace a report that already arrived: a device's lost
+// promise can resolve after the Go program exited (Firefox), which throws "Go
+// program has already exited" late.
+w.onerror = (e) => { if (window.__report === undefined) window.__report = JSON.stringify({error: "worker: " + e.message + "\n" + (window.__log || []).join("\n")}); };
+w.addEventListener("message", (e) => { if (e.data && e.data.log) (window.__log = window.__log || []).push(e.data.log); });
 </script>`
 
 const worker = `importScripts("wasm_exec.js");
+// the Go program's stderr (a fatal error) reaches the page: the Firefox and Safari lanes have no console
+const oldLog = console.log;
+console.log = (...a) => { postMessage({log: a.join(" ")}); oldLog(...a); };
 const go = new Go();
 WebAssembly.instantiateStreaming(fetch("webtest.wasm"), go.importObject).then((r) => go.run(r.instance));`
 

@@ -19,6 +19,10 @@
 //	shaders    WGSL the GPU refuses (a reserved word, a syntax error) must fail with
 //	           errno InvalidShader and the compiler's message; a valid source is the
 //	           control; exit 0 when every case is as expected
+//	unbounded  what the host refuses for its loop budget: errno 13 (the host's bind
+//	           group 3 in WGSL, a 4-group layout, a SetBindGroup of 3) and errno 15 (a
+//	           loop beside every storage buffer the device allows, a loop in a module
+//	           with a vertex entry, an auto layout); a bounded loop is the control
 //	quota      allocates 64 MiB buffers through the remote device until
 //	           the guest-side quota refuses
 //	bench N    N interleaved rounds of the per-submit round trip at 4 KiB
@@ -84,6 +88,8 @@ func main() {
 		quota(s)
 	case "shaders":
 		shaders()
+	case "unbounded":
+		unbounded()
 	case "bench":
 		rounds := 30
 		if len(os.Args) > 2 {
@@ -344,4 +350,136 @@ func shaders() {
 		os.Exit(1)
 	}
 	fmt.Println("3 shader cases as expected")
+}
+
+// unbounded checks what the host refuses because of its loop budget (layer 4
+// of the GPU time scheduling): each case opens a context of its own and
+// expects an errno. The control, a looping shader the host can bound, passes.
+func unbounded() {
+	loopy := func(n int) string {
+		var b strings.Builder
+		for i := 0; i < n; i++ {
+			fmt.Fprintf(&b, "@group(0) @binding(%d) var<storage, read_write> b%d: array<u32>;\n", i, i)
+		}
+		b.WriteString("@compute @workgroup_size(1) fn main() { var s = 0u; for (var i = 0u; i < 100u; i++) { s += i; } b0[0] = s; }")
+		return b.String()
+	}
+	storage := func(n int) []webgpu.BindGroupLayoutEntry {
+		var es []webgpu.BindGroupLayoutEntry
+		for i := 0; i < n; i++ {
+			es = append(es, webgpu.BindGroupLayoutEntry{Binding: uint32(i), Visibility: webgpu.ShaderStageCompute,
+				Buffer: &webgpu.BufferBindingLayout{Type: webgpu.BufferBindingTypeStorage}})
+		}
+		return es
+	}
+	cases := []struct {
+		name string
+		want batchsink.Errno
+		run  func(d *webgpu.Device) error
+	}{
+		{"control: a loop the host can bound", batchsink.Success, func(d *webgpu.Device) error {
+			bgl, err := d.CreateBindGroupLayout(webgpu.BindGroupLayoutDescriptor{Entries: storage(1)})
+			if err != nil {
+				return err
+			}
+			pl, err := d.CreatePipelineLayout(webgpu.PipelineLayoutDescriptor{BindGroupLayouts: []*webgpu.BindGroupLayout{bgl}})
+			if err != nil {
+				return err
+			}
+			m, err := d.CreateShaderModule(webgpu.ShaderModuleDescriptor{Code: loopy(1)})
+			if err != nil {
+				return err
+			}
+			_, err = d.CreateComputePipeline(webgpu.ComputePipelineDescriptor{Layout: pl, Compute: webgpu.ProgrammableStage{Module: m, EntryPoint: "main"}})
+			return err
+		}},
+		{"@group(3), the host's, in WGSL", batchsink.Reserved, func(d *webgpu.Device) error {
+			_, err := d.CreateShaderModule(webgpu.ShaderModuleDescriptor{Code: "@group(3) @binding(0) var<storage, read_write> x: array<u32>;\n@compute @workgroup_size(1) fn main() { x[0] = 1u; }"})
+			return err
+		}},
+		{"a pipeline layout with 4 groups", batchsink.Reserved, func(d *webgpu.Device) error {
+			bgl, err := d.CreateBindGroupLayout(webgpu.BindGroupLayoutDescriptor{Entries: storage(1)})
+			if err != nil {
+				return err
+			}
+			_, err = d.CreatePipelineLayout(webgpu.PipelineLayoutDescriptor{BindGroupLayouts: []*webgpu.BindGroupLayout{bgl, bgl, bgl, bgl}})
+			return err
+		}},
+		{"a loop beside one storage buffer more than the capset reports", batchsink.Unbounded, func(d *webgpu.Device) error {
+			bgl, err := d.CreateBindGroupLayout(webgpu.BindGroupLayoutDescriptor{Entries: storage(9)})
+			if err != nil {
+				return err
+			}
+			pl, err := d.CreatePipelineLayout(webgpu.PipelineLayoutDescriptor{BindGroupLayouts: []*webgpu.BindGroupLayout{bgl}})
+			if err != nil {
+				return err
+			}
+			m, err := d.CreateShaderModule(webgpu.ShaderModuleDescriptor{Code: loopy(9)})
+			if err != nil {
+				return err
+			}
+			_, err = d.CreateComputePipeline(webgpu.ComputePipelineDescriptor{Layout: pl, Compute: webgpu.ProgrammableStage{Module: m, EntryPoint: "main"}})
+			return err
+		}},
+		{"a loop in a module with a vertex entry", batchsink.Unbounded, func(d *webgpu.Device) error {
+			_, err := d.CreateShaderModule(webgpu.ShaderModuleDescriptor{Code: "@vertex fn v(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f { var s = 0.0; for (var k = 0u; k < i; k++) { s += 1.0; } return vec4f(s); }"})
+			return err
+		}},
+		{"a pipeline with an auto layout and a loop", batchsink.Unbounded, func(d *webgpu.Device) error {
+			m, err := d.CreateShaderModule(webgpu.ShaderModuleDescriptor{Code: "@compute @workgroup_size(1) fn main() { var s = 0u; for (var i = 0u; i < 100u; i++) { s += i; } }"})
+			if err != nil {
+				return err
+			}
+			_, err = d.CreateComputePipeline(webgpu.ComputePipelineDescriptor{Compute: webgpu.ProgrammableStage{Module: m, EntryPoint: "main"}})
+			return err
+		}},
+		{"SetBindGroup of the host's index", batchsink.Reserved, func(d *webgpu.Device) error {
+			bgl, err := d.CreateBindGroupLayout(webgpu.BindGroupLayoutDescriptor{Entries: storage(1)})
+			if err != nil {
+				return err
+			}
+			buf, err := d.CreateBuffer(webgpu.BufferDescriptor{Size: 16, Usage: webgpu.BufferUsageStorage})
+			if err != nil {
+				return err
+			}
+			bg, err := d.CreateBindGroup(webgpu.BindGroupDescriptor{Layout: bgl, Entries: []webgpu.BindGroupEntry{{Binding: 0, Buffer: buf}}})
+			if err != nil {
+				return err
+			}
+			rec := d.NewRecorder()
+			p := rec.BeginComputePass()
+			p.SetBindGroup(3, bg)
+			if err := p.End(); err != nil {
+				return err
+			}
+			_, err = rec.Submit()
+			return err
+		}},
+	}
+	bad := 0
+	for _, c := range cases {
+		s, err := batchsink.Open()
+		must(err)
+		err = c.run(s.Device("unbounded"))
+		if err == nil {
+			err = s.Flush()
+		}
+		var be *batchsink.Error
+		got := batchsink.Success
+		if errors.As(err, &be) {
+			got = be.Errno
+		} else if err != nil {
+			got = 255
+		}
+		ok := got == c.want
+		fmt.Printf("%s: %v (errno %d, want %d, as expected: %v)\n", c.name, err, got, c.want, ok)
+		if !ok {
+			bad++
+		}
+		s.Close()
+	}
+	if bad > 0 {
+		os.Exit(1)
+	}
+	fmt.Printf("%d unbounded cases as expected\n", len(cases))
 }

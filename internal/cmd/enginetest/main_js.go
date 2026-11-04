@@ -153,7 +153,10 @@ func main() {
 		rep.Adapter = a.Info()
 	}
 	nnMod := nn.NewModule()
-	nnMod.Backends = append(nnMod.Backends, nnwebgpu.Backend{Limits: onnx.DefaultLimits, AllowFallback: allow})
+	// nnloopwork and nnloopmin set the loop budget of the wasi-nn kernels (for
+	// the test of the cut); noloop=1 turns it off here too.
+	nnMod.Backends = append(nnMod.Backends, nnwebgpu.Backend{Limits: onnx.DefaultLimits, AllowFallback: allow,
+		LoopWork: uint64(param("nnloopwork")), LoopMin: uint32(param("nnloopmin")), NoLoopBudget: param("noloop") == 1})
 	// Surfaces go to the page as the playground's engine worker sends them
 	// to the dashboard (docs/DESIGN.md, "Surfaces"); the page acknowledges
 	// the frames it drew.
@@ -204,7 +207,8 @@ func main() {
 		}
 		return nil
 	}))
-	mods := webgpu.HostModules(webgpu.Browser{AllowFallback: allow, OnSurface: onSurface})
+	mods := webgpu.HostModules(webgpu.Browser{AllowFallback: allow, OnSurface: onSurface,
+		LoopWork: uint64(param("loopwork")), LoopMin: uint32(param("loopmin")), NoLoopBudget: param("noloop") == 1})
 	// loopwork (invocation-iterations) and loopmin set the layer-4 loop
 	// budget; noloop=1 turns it off (for A/B measurements).
 	batchMod := gpubatch.NewModule(gpubatch.Browser{AllowFallback: allow,

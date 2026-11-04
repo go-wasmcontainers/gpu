@@ -145,6 +145,12 @@ func main() {
 		b, _ := json.Marshal(rep)
 		js.Global().Call("postMessage", string(b))
 	}
+	defer func() { // a panic is the report (the Firefox and Safari lanes have no console)
+		if r := recover(); r != nil {
+			rep.Error = fmt.Sprint("panic: ", r)
+			post()
+		}
+	}()
 	b, err := fetch("cases.json")
 	if err != nil {
 		rep.Error = err.Error()

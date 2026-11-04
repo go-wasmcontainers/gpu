@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	wg "github.com/go-gfx/webgpu"
+	"github.com/go-gfx/webgpu/batch"
 	"github.com/go-wasmcontainers/gpu/nn"
 	"github.com/go-wasmcontainers/gpu/onnx"
 )
@@ -22,6 +23,14 @@ type Backend struct {
 	// AllowFallback accepts a software adapter; off by default, since its
 	// work is not GPU work.
 	AllowFallback bool
+	// NoLoopBudget turns off the loop budget (go-gfx/webgpu batch.LoopBudget,
+	// 2^36 work): by default every kernel is rewritten so that its loops
+	// stop, whatever a model's shapes ask for, and a cut kernel fails the run.
+	NoLoopBudget bool
+	// LoopWork and LoopMin set the loop budget's work (default 2^36) and
+	// its floor (default 1024); for tests of the cut.
+	LoopWork uint64
+	LoopMin  uint32
 }
 
 // NewModule is the wasi-nn host module for the browser: the pure-Go CPU
@@ -60,7 +69,15 @@ func (b Backend) Load(builders [][]byte, _ nn.Target) (nn.Graph, nn.Errno) {
 	if mem <= 0 {
 		mem = 256 << 20
 	}
-	d, err := newGPUDevice(b.AllowFallback, mem)
+	var lb *batch.LoopBudget
+	if !b.NoLoopBudget {
+		w := b.LoopWork
+		if w == 0 {
+			w = 1 << 36
+		}
+		lb = &batch.LoopBudget{Work: w, MinIterations: b.LoopMin, Group: 3}
+	}
+	d, err := newGPUDevice(b.AllowFallback, mem, lb)
 	if err != nil {
 		return nil, nn.UnsupportedOperation // no GPU here: never the CPU instead
 	}

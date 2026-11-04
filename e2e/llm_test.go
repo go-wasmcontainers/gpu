@@ -242,7 +242,7 @@ func TestLLMOracle(t *testing.T) {
 	requireGPU(t, rep)
 	for i, o := range oracle {
 		r := rep.Results[i]
-		t.Logf("%s (%.0f ms): exit %d\n%s%s", r.Name, r.Ms, r.Exit, r.Stdout, r.Stderr)
+		t.Logf("%s (%.0f ms): exit %d\n%s%s events %q", r.Name, r.Ms, r.Exit, r.Stdout, r.Stderr, r.Events)
 		if r.Exit != 0 {
 			t.Errorf("%s: exit %d (%s)", r.Name, r.Exit, r.Error)
 			continue

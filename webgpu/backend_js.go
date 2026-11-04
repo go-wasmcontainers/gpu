@@ -11,6 +11,7 @@ import (
 	"time"
 
 	wg "github.com/go-gfx/webgpu"
+	"github.com/go-gfx/webgpu/batch"
 	"github.com/go-wasmcontainers/gpu/wit"
 )
 
@@ -38,6 +39,39 @@ type Browser struct {
 	FrameInterval time.Duration
 	// MaxWidth and MaxHeight bound a surface (default 1920x1080).
 	MaxWidth, MaxHeight int
+	// LoopWork and LoopMin set the loop budget (layer 4 of the GPU time
+	// scheduling, go-gfx/webgpu batch.LoopBudget): every WGSL module is
+	// rewritten so that its loops stop, and a module the host cannot bound
+	// traps at create-shader-module. 0: gpubatch's defaults. NoLoopBudget
+	// turns it off (for measurements).
+	LoopWork     uint64
+	LoopMin      uint32
+	NoLoopBudget bool
+}
+
+// loopBudget is the Browser's LoopBudget for a device.
+func (b Browser) loopBudget() batch.LoopBudget {
+	w := b.LoopWork
+	if w == 0 {
+		w = 1 << 36 // gpubatch.DefaultLoopWork
+	}
+	return batch.LoopBudget{Work: w, MinIterations: b.LoopMin, Group: 3}
+}
+
+// computePass is a compute pass encoder, guarded or not.
+type computePass interface {
+	SetPipeline(*wg.ComputePipeline)
+	SetBindGroup(index uint32, g *wg.BindGroup, offsets ...uint32) error
+	DispatchWorkgroups(x, y, z uint32)
+	End() error
+}
+
+// rawPass is a pass without the loop budget.
+type rawPass struct{ *wg.ComputePassEncoder }
+
+func (p rawPass) SetBindGroup(i uint32, g *wg.BindGroup, offs ...uint32) error {
+	p.ComputePassEncoder.SetBindGroup(i, g, offs...)
+	return nil
 }
 
 // SurfaceEvent is what OnSurface receives.
@@ -160,8 +194,14 @@ func (b Browser) Open(p Process, lim Limits, h *Handles) Session {
 	// One quota per process, shared by every device it requests. No
 	// optional feature and no required limit is listed, so none is ever
 	// granted (timestamp-query included).
+	// The loop budget's own buffers (budgets, flag, copies) are not the
+	// guest's: its memory quota stays what it asked for.
+	overhead := int64(64 << 10)
+	if b.NoLoopBudget {
+		overhead = 0
+	}
 	q := &wg.Quota{
-		MemoryBytes:   lim.MemoryBytes,
+		MemoryBytes:   lim.MemoryBytes + overhead,
 		Pipelines:     lim.Pipelines,
 		ShaderBytes:   lim.ShaderBytes,
 		SurfaceWidth:  b.MaxWidth,
@@ -177,6 +217,58 @@ type session struct {
 	lim       Limits
 	h         *Handles
 	quota     *wg.Quota
+
+	chkMu     sync.Mutex
+	checks    []chan error // loop-budget flag reads in flight, one per armed submit
+	truncated error        // the first truncation: nothing the guest reads after it is trusted
+
+	gmu    sync.Mutex
+	guards map[*wg.Device]*batch.Guard // the loop budget of each device
+	encG   map[*wg.CommandEncoder]*batch.Guard
+}
+
+// waitChecks waits for the loop-budget flag reads in flight and returns the
+// error of a truncation (now or earlier): a guest that waits for the GPU
+// (map-async, on-submitted-work-done) is told, never given a partial result.
+func (s *session) waitChecks() error {
+	s.chkMu.Lock()
+	cs := s.checks
+	s.checks = nil
+	s.chkMu.Unlock()
+	for _, c := range cs {
+		if err := <-c; err != nil {
+			s.chkMu.Lock()
+			if s.truncated == nil {
+				s.truncated = err
+			}
+			s.chkMu.Unlock()
+		}
+	}
+	s.chkMu.Lock()
+	defer s.chkMu.Unlock()
+	return s.truncated
+}
+
+// guard returns the device's loop-budget guard, made on first use; nil if the
+// loop budget is off.
+func (s *session) guard(d *wg.Device) (*batch.Guard, error) {
+	if s.b.NoLoopBudget {
+		return nil, nil
+	}
+	s.gmu.Lock()
+	defer s.gmu.Unlock()
+	if g, ok := s.guards[d]; ok {
+		return g, nil
+	}
+	g, err := batch.NewGuard(d, s.b.loopBudget())
+	if err != nil {
+		return nil, err
+	}
+	if s.guards == nil {
+		s.guards, s.encG = map[*wg.Device]*batch.Guard{}, map[*wg.CommandEncoder]*batch.Guard{}
+	}
+	s.guards[d] = g
+	return g, nil
 }
 
 var asyncCalls = map[string]bool{
@@ -349,8 +441,17 @@ func (s *session) Call(name string, a []any) (any, error) {
 				return errRecord(0, "required limits are not offered to containers"), nil
 			}
 		}
-		dev, err := ad.RequestDevice(ctx, &wg.DeviceDescriptor{Quota: s.quota})
+		var host map[string]uint64 // what the loop budget needs of the device, not the guest's request
+		if !s.b.NoLoopBudget {
+			host = batch.RequiredLimits(ad)
+			s.quota.Limits = host
+		}
+		dev, err := ad.RequestDevice(ctx, &wg.DeviceDescriptor{Quota: s.quota, RequiredLimits: host})
 		if err != nil {
+			return errRecord(1, err.Error()), nil
+		}
+		if _, err := s.guard(dev); err != nil {
+			dev.Destroy()
 			return errRecord(1, err.Error()), nil
 		}
 		h, err := s.put("gpu-device", dev, dev.Destroy)
@@ -427,7 +528,16 @@ func (s *session) Call(name string, a []any) (any, error) {
 			return nil, err
 		}
 		code, _ := record(a[1])[0].(string)
-		m, err := d.CreateShaderModule(wg.ShaderModuleDescriptor{Code: code})
+		var m *wg.ShaderModule
+		if g, _ := s.guard(d); g != nil {
+			// Rewritten so that its loops stop; refused if it cannot be
+			// bounded (errors wrap batch.ErrUnbounded, ErrReserved, ErrInvalid).
+			// (this call is synchronous: the browser's own verdict is the
+			// guest's get-compilation-info, not asked for here)
+			m, err = g.ShaderNoWait(wg.ShaderModuleDescriptor{Code: code})
+		} else {
+			m, err = d.CreateShaderModule(wg.ShaderModuleDescriptor{Code: code})
+		}
 		if err != nil {
 			var qe *wg.QuotaError
 			if errors.As(err, &qe) {
@@ -442,6 +552,9 @@ func (s *session) Call(name string, a []any) (any, error) {
 		p, err := get[*wg.ComputePipeline](s, a[0], "gpu-compute-pipeline")
 		if err != nil {
 			return nil, err
+		}
+		if !s.b.NoLoopBudget && u64(a[1]) >= uint64(s.b.loopBudget().Group) {
+			return nil, Trapf("get-bind-group-layout: group %d is reserved by the host (loop budget)", u64(a[1]))
 		}
 		l, err := p.GetBindGroupLayout(uint32(u64(a[1])))
 		if err != nil {
@@ -459,6 +572,11 @@ func (s *session) Call(name string, a []any) (any, error) {
 		if err != nil {
 			return nil, trap("create-command-encoder", err)
 		}
+		if g, _ := s.guard(d); g != nil {
+			s.gmu.Lock()
+			s.encG[e] = g
+			s.gmu.Unlock()
+		}
 		return s.put("gpu-command-encoder", e, nil)
 	case "[method]gpu-command-encoder.begin-compute-pass":
 		e, err := get[*wg.CommandEncoder](s, a[0], "gpu-command-encoder")
@@ -469,9 +587,15 @@ func (s *session) Call(name string, a []any) (any, error) {
 		if err != nil {
 			return nil, trap("begin-compute-pass", err)
 		}
-		return s.put("gpu-compute-pass-encoder", p, nil)
+		s.gmu.Lock()
+		g := s.encG[e]
+		s.gmu.Unlock()
+		if g != nil {
+			return s.put("gpu-compute-pass-encoder", computePass(g.Pass(e, p)), nil)
+		}
+		return s.put("gpu-compute-pass-encoder", computePass(rawPass{p}), nil)
 	case "[method]gpu-compute-pass-encoder.set-pipeline":
-		pe, err := get[*wg.ComputePassEncoder](s, a[0], "gpu-compute-pass-encoder")
+		pe, err := get[computePass](s, a[0], "gpu-compute-pass-encoder")
 		if err != nil {
 			return nil, err
 		}
@@ -482,7 +606,7 @@ func (s *session) Call(name string, a []any) (any, error) {
 		pe.SetPipeline(p)
 		return nil, nil
 	case "[method]gpu-compute-pass-encoder.set-bind-group":
-		pe, err := get[*wg.ComputePassEncoder](s, a[0], "gpu-compute-pass-encoder")
+		pe, err := get[computePass](s, a[0], "gpu-compute-pass-encoder")
 		if err != nil {
 			return nil, err
 		}
@@ -492,10 +616,12 @@ func (s *session) Call(name string, a []any) (any, error) {
 				return nil, err
 			}
 		}
-		pe.SetBindGroup(uint32(u64(a[1])), bg, dynamicOffsets(a[3])...)
+		if err := pe.SetBindGroup(uint32(u64(a[1])), bg, dynamicOffsets(a[3])...); err != nil {
+			return nil, trap("set-bind-group", err)
+		}
 		return okUnit, nil
 	case "[method]gpu-compute-pass-encoder.dispatch-workgroups":
-		pe, err := get[*wg.ComputePassEncoder](s, a[0], "gpu-compute-pass-encoder")
+		pe, err := get[computePass](s, a[0], "gpu-compute-pass-encoder")
 		if err != nil {
 			return nil, err
 		}
@@ -509,7 +635,7 @@ func (s *session) Call(name string, a []any) (any, error) {
 		pe.DispatchWorkgroups(uint32(u64(a[1])), uint32(y), uint32(z))
 		return nil, nil
 	case "[method]gpu-compute-pass-encoder.end":
-		pe, err := get[*wg.ComputePassEncoder](s, a[0], "gpu-compute-pass-encoder")
+		pe, err := get[computePass](s, a[0], "gpu-compute-pass-encoder")
 		if err != nil {
 			return nil, err
 		}
@@ -553,7 +679,16 @@ func (s *session) Call(name string, a []any) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		cb, err := e.Finish()
+		s.gmu.Lock()
+		g := s.encG[e]
+		delete(s.encG, e)
+		s.gmu.Unlock()
+		var cb *wg.CommandBuffer
+		if g != nil {
+			cb, err = g.Finish(e)
+		} else {
+			cb, err = e.Finish()
+		}
 		if err != nil {
 			return nil, trap("finish", err)
 		}
@@ -565,11 +700,17 @@ func (s *session) Call(name string, a []any) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := s.waitChecks(); err != nil {
+			return nil, trap("on-submitted-work-done", err)
+		}
 		return nil, q.q.OnSubmittedWorkDone(ctx)
 	case "[method]gpu-buffer.map-async":
 		b, err := get[*wg.Buffer](s, a[0], "gpu-buffer")
 		if err != nil {
 			return nil, err
+		}
+		if err := s.waitChecks(); err != nil {
+			return nil, trap("map-async", err)
 		}
 		var off, size uint64
 		if v, ok := opt(a[2]); ok {
@@ -665,7 +806,12 @@ func (s *session) createComputePipeline(a []any) (any, error) {
 			return nil, err
 		}
 	}
-	p, err := d.CreateComputePipeline(desc)
+	var p *wg.ComputePipeline
+	if g, _ := s.guard(d); g != nil {
+		p, err = g.Pipeline(desc)
+	} else {
+		p, err = d.CreateComputePipeline(desc)
+	}
 	if err != nil {
 		var qe *wg.QuotaError
 		if errors.As(err, &qe) {
@@ -737,8 +883,31 @@ func (s *session) submit(a []any) (any, error) {
 		}
 		cbs = append(cbs, cb)
 	}
-	if err := q.q.Submit(cbs...); err != nil {
-		return nil, trap("submit", err)
+	g, _ := s.guard(q.dev)
+	var serr error
+	if g != nil {
+		// submit does not wait for the GPU, so the flag is read in the
+		// background; every wait of the guest (map-async, on-submitted-work-done)
+		// first waits for it, so a truncated result is never read.
+		var wait func() error
+		if wait, serr = g.SubmitNoWait(q.q, cbs...); wait != nil {
+			done := make(chan error, 1)
+			s.chkMu.Lock()
+			s.checks = append(s.checks, done)
+			s.chkMu.Unlock()
+			go func() {
+				err := wait()
+				if errors.Is(err, batch.ErrTruncated) {
+					s.loseDevices() // a loop was cut: the container's devices go, as for a timeout
+				}
+				done <- err
+			}()
+		}
+	} else {
+		serr = q.q.Submit(cbs...)
+	}
+	if serr != nil {
+		return nil, trap("submit", serr)
 	}
 	seq := q.dev.Submitted()
 	go func() {

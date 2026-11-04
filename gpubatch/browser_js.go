@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	wg "github.com/go-gfx/webgpu"
@@ -86,7 +87,13 @@ func (b Browser) Open(memory int64) (Device, error) {
 		maxRead = int(DefaultLimits.MaxRead)
 	}
 	q := &wg.Quota{MemoryBytes: memory, Pipelines: 256, ShaderBytes: 1 << 20, ReadBytes: maxRead, Features: req}
-	dev, err := ad.RequestDevice(ctx, &wg.DeviceDescriptor{Label: "wasi_webgpu_batch", RequiredFeatures: req, Quota: q})
+	// One more storage buffer per stage than the default: the loop budget's
+	// flag, so that a shader that binds the 8 the capset reports can still
+	// be rewritten.
+	if !b.NoLoopBudget {
+		q.Limits = batch.RequiredLimits(ad)
+	}
+	dev, err := ad.RequestDevice(ctx, &wg.DeviceDescriptor{Label: "wasi_webgpu_batch", RequiredFeatures: req, RequiredLimits: q.Limits, Quota: q})
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +108,7 @@ func (b Browser) Open(memory int64) (Device, error) {
 	if work == 0 {
 		work = DefaultLoopWork
 	}
-	return &browserDevice{dev: dev, features: features, loop: batch.LoopBudget{
+	bd := &browserDevice{dev: dev, features: features, loop: batch.LoopBudget{
 		Work: work, MinIterations: b.LoopMin, Group: uint32(lim("maxBindGroups")) - 1}, noLoop: b.NoLoopBudget,
 		limits: wgpubatch.DeviceLimits{
 			MaxStorageBufferBindingSize:       lim("maxStorageBufferBindingSize"),
@@ -109,7 +116,31 @@ func (b Browser) Open(memory int64) (Device, error) {
 			MaxComputeInvocationsPerWorkgroup: uint32(lim("maxComputeInvocationsPerWorkgroup")),
 			MaxComputeWorkgroupsPerDimension:  uint32(lim("maxComputeWorkgroupsPerDimension")),
 			MaxStorageBuffersPerShaderStage:   uint32(lim("maxStorageBuffersPerShaderStage")),
-		}}, nil
+		}}
+	go func() { // a device the browser took, not the host: see LastBrowserLoss
+		<-dev.Lost()
+		if !bd.ours.Load() {
+			browserLoss.Lock()
+			browserLoss.last = time.Now()
+			browserLoss.Unlock()
+		}
+	}()
+	return bd, nil
+}
+
+// browserLoss is when a device of this page was last lost to the browser (its
+// own watchdog, a GPU reset) rather than destroyed by the host.
+var browserLoss struct {
+	sync.Mutex
+	last time.Time
+}
+
+// LastBrowserLoss implements LossWatcher: the time a device was last lost
+// without the host destroying it (zero if none).
+func (Browser) LastBrowserLoss() time.Time {
+	browserLoss.Lock()
+	defer browserLoss.Unlock()
+	return browserLoss.last
 }
 
 type browserDevice struct {
@@ -118,10 +149,11 @@ type browserDevice struct {
 	limits   wgpubatch.DeviceLimits
 	loop     batch.LoopBudget
 	noLoop   bool
+	ours     atomic.Bool // the host destroyed it
 }
 
 func (d *browserDevice) Caps() (uint32, wgpubatch.DeviceLimits) { return d.features, d.limits }
-func (d *browserDevice) Destroy()                               { d.dev.Destroy() }
+func (d *browserDevice) Destroy()                               { d.ours.Store(true); d.dev.Destroy() }
 
 // Backend returns a backend with the loop budget on (layer 4), unless the
 // provider turned it off. If the budget's host objects cannot be made, the
