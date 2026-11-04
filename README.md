@@ -98,8 +98,15 @@ container); this is its blocks M3 to M6.
 that would run for seconds is cut after `2^36 / invocations` iterations
 (go-gfx/wgsl `transform.LoopBudget`, parse only; a truncated submit answers
 errno 14 *truncated*, the grant is revoked, and the hostile shader's
-victim waits tens of milliseconds, not 3 to 4.5 s). Bind group 3 is the
-host's: a guest that uses it gets errno 13 *reserved*. Without
+victim waits tens of milliseconds, not 3 to 4.5 s). Nothing unbounded runs:
+a module the host cannot bound (WGSL its parser does not accept, a loop in a
+module with a vertex or fragment entry point, a rewrite the browser refuses)
+is refused with errno 15 *unbounded*. Bind group 3 is the host's: a guest
+that uses it gets errno 13 *reserved*. The `wasi:webgpu` module and the wasi-nn
+GPU kernels go through the same guard. A submit that never completes
+because the browser destroyed another container's device (Safari does) is
+not an overrun: the device is reset, the guest answers *context lost* and
+recreates its context, nobody is sanctioned. Without
   `--gpu` every function answers *denied*; without a GPU backend (native) or
   with only a software adapter, *unsupported*. `FuzzBatchCalls` drives
   arbitrary calls over arbitrary guest memory.

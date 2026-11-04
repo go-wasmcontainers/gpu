@@ -72,8 +72,8 @@ func runBatchCasesSanctions(t *testing.T, cases []engineCase, launch []string, q
 	if rep.GPU.Sanctions != sanctions {
 		t.Errorf("%d GPU sanction(s), want %d", rep.GPU.Sanctions, sanctions)
 	}
-	if rep.GPU.LoopFallbacks != 0 {
-		t.Errorf("%d WGSL module(s) the browser refused after the loop-budget rewrite", rep.GPU.LoopFallbacks)
+	if rep.GPU.LoopRefused != 0 {
+		t.Errorf("%d WGSL module(s) the browser refused after the loop-budget rewrite", rep.GPU.LoopRefused)
 	}
 	return rep
 }
@@ -89,6 +89,8 @@ func runBatchCasesRaw(t *testing.T, cases []engineCase, launch []string, query s
 	build(t, root, filepath.Join(site, "batchcompute.wasm"), "./examples/batchcompute", "wasip1")
 	build(t, root, filepath.Join(site, "hang.wasm"), "./e2e/testdata/hang", "wasip1")
 	build(t, root, filepath.Join(site, "victim.wasm"), "./e2e/testdata/victim", "wasip1")
+	build(t, root, filepath.Join(site, "hangwasi.wasm"), "./e2e/testdata/hangwasi", "wasip1")
+	build(t, root, filepath.Join(site, "mnist.wasm"), "./examples/mnist", "wasip1")
 	wasmExec, err := os.ReadFile(filepath.Join(runtime.GOROOT(), "lib", "wasm", "wasm_exec.js"))
 	if err != nil {
 		t.Fatal(err)
@@ -341,9 +343,6 @@ func TestBatchSanction(t *testing.T) {
 	// wait either.
 	for _, mode := range []string{"control", "combined", "split"} {
 		t.Run(mode, func(t *testing.T) {
-			if mode == "control" && browserName() == "safari" {
-				t.Skip("Safari destroys the hostile device itself after about 3 s and the victim's queued submit never completes (go-wasmcontainers/gpu#32, docs/gpu-scheduling.md): no unbounded control run is possible there")
-			}
 			// The combined frame is held to the 2 s cap, and the calibration is
 			// coarse (Firefox resolves a submit in 200 ms steps: a "3 s" shader
 			// ran 1.3 s once), so it aims higher to be sure to pass the cap.
@@ -380,6 +379,27 @@ func TestBatchSanction(t *testing.T) {
 				if len(h.Events) != 1 || !strings.HasPrefix(h.Events[0], "gpu/sanction ") || len(v.Events) != 0 {
 					t.Errorf("engine events: hostile %q, victim %q", h.Events, v.Events)
 				}
+			}
+			if mode == "control" && browserName() == "safari" {
+				// Safari destroys the hostile's device itself after about 3 s
+				// and the victim's queued submit never completes; then it
+				// answers "no adapter" for a minute or more (#32). What the host
+				// owes the victim is not to sanction it for that: the device is
+				// reset (an event), the grant kept. Whether Safari offers an
+				// adapter again within the run is Safari's.
+				resets := 0
+				for _, e := range v.Events {
+					if strings.HasPrefix(e, "gpu/device-reset ") {
+						resets++
+					}
+					if strings.HasPrefix(e, "gpu/sanction ") {
+						t.Errorf("the victim was sanctioned: %q", v.Events)
+					}
+				}
+				if resets != 1 {
+					t.Errorf("victim events %q: want one gpu/device-reset", v.Events)
+				}
+				return
 			}
 			m := victimStats.FindStringSubmatch(v.Stdout)
 			if v.Exit != 0 || m == nil || m[4] != "0" {
@@ -449,5 +469,68 @@ func TestBatchRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(r.Stdout, "bench crossings: 120 for 120 submits") {
 		t.Errorf("one crossing per submit expected: %q", r.Stdout)
+	}
+}
+
+// TestLoopBudgetRefusals: what the host refuses for its loop budget, as seen
+// from a container: errno 13 (the host's bind group) and errno 15 (a module
+// the host cannot bound), and the bounded control passes.
+func TestLoopBudgetRefusals(t *testing.T) {
+	if !loopBudgetOn() {
+		t.Skip("the loop budget is off")
+	}
+	rep := runBatchCasesRaw(t, []engineCase{{Name: "unbounded", Module: "batchcompute.wasm", Args: []string{"unbounded"}, GPU: true}},
+		launchFallbackArgs(), pageQuery(0, 0))
+	requireGPU(t, rep)
+	r := rep.Results[0]
+	t.Logf("%s (%.0f ms): exit %d\n%s%s", r.Name, r.Ms, r.Exit, r.Stdout, r.Stderr)
+	if r.Exit != 0 || !strings.Contains(r.Stdout, "7 unbounded cases as expected") {
+		t.Errorf("exit %d (%s), stdout %q", r.Exit, r.Error, r.Stdout)
+	}
+	if rep.GPU.Sanctions != 0 || rep.GPU.LoopRefused < 3 {
+		t.Errorf("sanctions %d (a refusal is not a sanction), refused %d (want at least 3)", rep.GPU.Sanctions, rep.GPU.LoopRefused)
+	}
+}
+
+// TestLoopBudgetWasiWebGPU: the wasi:webgpu host module (no scheduler) is not
+// a way around the loop budget: a hostile container's loop is cut, the
+// read-back traps with the truncation, and the guest never sees a partial
+// result.
+func TestLoopBudgetWasiWebGPU(t *testing.T) {
+	if !loopBudgetOn() {
+		t.Skip("the loop budget is off")
+	}
+	rep := runBatchCasesRaw(t, []engineCase{{Name: "hangwasi", Module: "hangwasi.wasm", GPU: true}}, launchFallbackArgs(), pageQuery(0, 0))
+	requireGPU(t, rep)
+	r := rep.Results[0]
+	t.Logf("%s (%.0f ms): exit %d (%s)\n%s%s", r.Name, r.Ms, r.Exit, r.Error, r.Stdout, r.Stderr)
+	if r.Exit == 0 || strings.Contains(r.Stdout, "NOT CUT") || !strings.Contains(r.Error+r.Stderr, "loop budget") {
+		t.Errorf("the hostile wasi:webgpu container was not cut by the loop budget: exit %d (%s), stdout %q", r.Exit, r.Error, r.Stdout)
+	}
+	if r.Ms > 2000 {
+		t.Errorf("the cut took %.0f ms", r.Ms)
+	}
+}
+
+// TestLoopBudgetWasiNN: the wasi-nn GPU kernels are rewritten too. With the
+// default work the MNIST model runs; with the work and the floor at 1 its
+// loops are cut and the run fails with the truncation.
+func TestLoopBudgetWasiNN(t *testing.T) {
+	if !loopBudgetOn() {
+		t.Skip("the loop budget is off")
+	}
+	mnist := []engineCase{{Name: "mnist-gpu", Module: "mnist.wasm", Args: []string{"gpu"}, GPU: true}}
+	ok := runBatchCasesRaw(t, mnist, launchFallbackArgs(), pageQuery(0, 0))
+	requireGPU(t, ok)
+	if r := ok.Results[0]; r.Exit != 0 || !strings.Contains(r.Stdout, "digit 7") {
+		t.Errorf("default work: exit %d (%s), stdout %q", r.Exit, r.Error, r.Stdout)
+	}
+	cut := runBatchCasesRaw(t, mnist, launchFallbackArgs(), "?nnloopwork=1&nnloopmin=1")
+	r := cut.Results[0]
+	t.Logf("work 1: exit %d (%s)\n%s%s", r.Exit, r.Error, r.Stdout, r.Stderr)
+	// wasi-nn reports a failed kernel as a runtime error at compute; the
+	// default run above is the control that the loops are what was cut.
+	if r.Exit == 0 || strings.Contains(r.Stdout, "digit 7") || !strings.Contains(r.Error+r.Stderr+r.Stdout, "compute: wasi-nn: runtime error") {
+		t.Errorf("work 1: the kernels were not cut: exit %d (%s), stdout %q", r.Exit, r.Error, r.Stdout)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	wg "github.com/go-gfx/webgpu"
+	"github.com/go-gfx/webgpu/batch"
 )
 
 // gpuDevice runs the kernels on a WebGPU device (github.com/go-gfx/webgpu).
@@ -22,11 +23,12 @@ type gpuDevice struct {
 
 	mu        sync.Mutex
 	pipelines map[string]*wg.ComputePipeline
+	guard     *batch.Guard // the loop budget; nil if off
 }
 
 // newGPUDevice requests an adapter and a device whose memory is bounded
 // by limit. A fallback adapter is refused unless allowFallback.
-func newGPUDevice(allowFallback bool, limit int64) (*gpuDevice, error) {
+func newGPUDevice(allowFallback bool, limit int64, loopBudget *batch.LoopBudget) (*gpuDevice, error) {
 	g, err := wg.Navigator()
 	if err != nil {
 		return nil, err
@@ -36,11 +38,24 @@ func newGPUDevice(allowFallback bool, limit int64) (*gpuDevice, error) {
 	if err != nil {
 		return nil, err
 	}
-	d, err := a.RequestDevice(ctx, &wg.DeviceDescriptor{Label: "wasi-nn", Quota: &wg.Quota{MemoryBytes: limit}})
+	q := &wg.Quota{MemoryBytes: limit}
+	var need map[string]uint64
+	if loopBudget != nil {
+		need = batch.RequiredLimits(a)
+		q.Limits = need
+	}
+	d, err := a.RequestDevice(ctx, &wg.DeviceDescriptor{Label: "wasi-nn", Quota: q, RequiredLimits: need})
 	if err != nil {
 		return nil, err
 	}
-	return &gpuDevice{d: d, info: a.Info(), pipelines: map[string]*wg.ComputePipeline{}}, nil
+	gd := &gpuDevice{d: d, info: a.Info(), pipelines: map[string]*wg.ComputePipeline{}}
+	if loopBudget != nil {
+		if gd.guard, err = batch.NewGuard(d, *loopBudget); err != nil {
+			d.Destroy()
+			return nil, err
+		}
+	}
+	return gd, nil
 }
 
 func (g *gpuDevice) lost() bool {
@@ -53,6 +68,14 @@ func (g *gpuDevice) lost() bool {
 }
 
 type gbuf struct{ b *wg.Buffer }
+
+// unguarded is a pass without the loop budget.
+type unguarded struct{ *wg.ComputePassEncoder }
+
+func (p unguarded) SetBindGroup(i uint32, g *wg.BindGroup, offs ...uint32) error {
+	p.ComputePassEncoder.SetBindGroup(i, g, offs...)
+	return nil
+}
 
 func f32bytes(f []float32) []byte {
 	b := make([]byte, 4*len(f))
@@ -150,13 +173,22 @@ func (g *gpuDevice) pipeline(wgsl string) (*wg.ComputePipeline, error) {
 	if ok {
 		return p, nil
 	}
-	mod, err := g.d.CreateShaderModule(wg.ShaderModuleDescriptor{Code: wgsl})
+	var mod *wg.ShaderModule
+	var err error
+	if g.guard != nil {
+		mod, err = g.guard.Shader(wg.ShaderModuleDescriptor{Code: wgsl})
+	} else {
+		mod, err = g.d.CreateShaderModule(wg.ShaderModuleDescriptor{Code: wgsl})
+	}
 	if err != nil {
 		return nil, err
 	}
-	p, err = g.d.CreateComputePipelineAsync(stdctx.Background(), wg.ComputePipelineDescriptor{
-		Compute: wg.ProgrammableStage{Module: mod, EntryPoint: "main"},
-	})
+	desc := wg.ComputePipelineDescriptor{Compute: wg.ProgrammableStage{Module: mod, EntryPoint: "main"}}
+	if g.guard != nil {
+		p, err = g.guard.PipelineAsync(stdctx.Background(), desc)
+	} else {
+		p, err = g.d.CreateComputePipelineAsync(stdctx.Background(), desc)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("webgpu: pipeline: %w", err)
 	}
@@ -206,12 +238,23 @@ func (g *gpuDevice) run(kernel string, n int64, prm []uint32, bufs ...buf) error
 	if err != nil {
 		return err
 	}
-	pass, err := enc.BeginComputePass(kernel)
+	rawPass, err := enc.BeginComputePass(kernel)
 	if err != nil {
 		return err
 	}
+	var pass interface {
+		SetPipeline(*wg.ComputePipeline)
+		SetBindGroup(index uint32, g *wg.BindGroup, offsets ...uint32) error
+		DispatchWorkgroups(x, y, z uint32)
+		End() error
+	} = unguarded{rawPass}
+	if g.guard != nil {
+		pass = g.guard.Pass(enc, rawPass)
+	}
 	pass.SetPipeline(p)
-	pass.SetBindGroup(0, group)
+	if err := pass.SetBindGroup(0, group); err != nil {
+		return err
+	}
 	// 64 invocations per workgroup, laid over x and y when n exceeds one
 	// dimension's limit (kernels.go: index is x + y * 65535 * 64).
 	groups := (n + 63) / 64
@@ -224,9 +267,16 @@ func (g *gpuDevice) run(kernel string, n int64, prm []uint32, bufs ...buf) error
 	if err := pass.End(); err != nil {
 		return err
 	}
-	cb, err := enc.Finish()
+	if g.guard == nil {
+		cb, err := enc.Finish()
+		if err != nil {
+			return err
+		}
+		return g.d.Queue().Submit(cb)
+	}
+	cb, err := g.guard.Finish(enc)
 	if err != nil {
 		return err
 	}
-	return g.d.Queue().Submit(cb)
+	return g.guard.Submit(g.d.Queue(), cb)
 }
