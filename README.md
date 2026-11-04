@@ -85,7 +85,15 @@ container); this is its blocks M3 to M6.
   (`wire.CheckRanges`: writes, copies, indirect arguments, dispatch sizes) are
   checked **before** WebGPU sees anything; a refused frame loses its context
   and releases what it held; the guest memory is written only inside the
-  `read` window; a submit not done after 2 s destroys the device. Without
+  `read` window. GPU time is scheduled and budgeted
+  ([docs/gpu-scheduling.md](docs/gpu-scheduling.md)): one submit in flight
+  across all containers, served round-robin; each submit has a time budget
+  from the moment it gets its turn (250 ms for a frame that only streams
+  commands, 2 s for a frame that creates objects), and a container whose
+  submit overruns has its device destroyed and its GPU grant revoked for the
+  rest of its life (*timeout* once, then *revoked*; the engine reports a
+  `gpu-sanction` event and `wctr inspect` shows `State.Sanction`); a compute
+  quota (`wire.CheckInvocations`) refuses oversized dispatches up front. Without
   `--gpu` every function answers *denied*; without a GPU backend (native) or
   with only a software adapter, *unsupported*. `FuzzBatchCalls` drives
   arbitrary calls over arbitrary guest memory.
@@ -251,7 +259,7 @@ on SwiftShader (labelled fallback: proves the WGSL, not a GPU).
 | Firefox | Windows | since 141 | not run here |
 | Firefox | macOS, Apple silicon | 145 (Tahoe), 147 (older macOS); not Intel | see the row above |
 | Firefox | Linux | not supported (MDN browser-compat-data `api.GPU`, bug 2006676) | none |
-| Safari 27.2 | macOS 27, Apple M4 Max | yes (since 26), adapter reported as vendor `apple`, architecture `apple`, not a fallback; `shader-f16` yes, `subgroups` no here | passes locally through safaridriver (batch module, refusals, quota, 123/123 ONNX cases, MNIST-12 within 3.1e-5, 2 s deadline at 2002 ms) |
+| Safari 27.2 | macOS 27, Apple M4 Max | yes (since 26), adapter reported as vendor `apple`, architecture `apple`, not a fallback; `shader-f16` yes, `subgroups` no here | passes locally through safaridriver (batch module, refusals, quota, 123/123 ONNX cases, MNIST-12 within 3.1e-5; no GPU sanction on legitimate work, longest submit 11.7 ms; **the hostile-shader run does not pass**: WebKit's own watchdog destroys a 3 s shader and then refuses adapters, see docs/gpu-scheduling.md) |
 | Safari 27.2 / 26.6.2 | GitHub macOS runners (`macos-15`, `macos-26`; virtual machines) | no: `macos-15` has no `navigator.gpu`, `macos-26` answers `requestAdapter` with null | no CI lane (the lane fails there; WebKit excludes VMs) |
 
 Per-submit round trip seen from the guest, 30 interleaved rounds each, Apple
@@ -283,11 +291,13 @@ and architecture, so the lane relies on `isFallbackAdapter`; it fails, never
 skips, when `requestAdapter` returns null. Firefox 159 offers `shader-f16`;
 the f32 path stays mandatory (older Firefox, other platforms). Known:
 a submit costs about 200 ms in Firefox 159 (quantised read-back), against
-well under 1 ms in Chromium (go-wasmcontainers/gpu#25). The 2 s deadline
-destroys the device but does not cancel work the GPU already holds: a
-container started in the next seconds queues behind it (with a 5 s shader,
-Firefox's next container hit its own 2 s deadline; go-wasmcontainers/gpu#26),
-so `TestBatchDeadline` uses a 3 s shader.
+well under 1 ms in Chromium (go-wasmcontainers/gpu#25); the longest
+legitimate submit measured there is 226 ms, which is why the steady-state
+budget is 500 ms. Destroying a device does not cancel work the GPU already
+holds (go-wasmcontainers/gpu#26): a sanctioned container's remaining shader
+time is still waited out, by the host before it serves anyone else, so an
+innocent container is not sanctioned for it
+([docs/gpu-scheduling.md](docs/gpu-scheduling.md), with the measurements).
 
 ## `onnx`
 

@@ -126,7 +126,7 @@ func FuzzBatchCalls(f *testing.F) {
 					t.Fatalf("function %d wrote guest byte %d outside [%d, %d)", fn, i, lo, hi)
 				}
 			}
-			if r.Ret > uint64(Failed) {
+			if r.Ret > uint64(Revoked) {
 				t.Fatalf("function %d returned %d", fn, r.Ret)
 			}
 		}

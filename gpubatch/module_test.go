@@ -44,6 +44,7 @@ type fakeDevice struct {
 	replays   int
 	destroyed bool
 	delay     time.Duration // each replay takes this long
+	delayN    int           // ... but only the first delayN replays, if positive
 	live      int           // buffers alive
 	features  uint32
 }
@@ -114,6 +115,11 @@ func (b *fakeBackend) Replay(words []uint32, data []byte) error {
 	b.d.mu.Lock()
 	b.d.replays++
 	delay := b.d.delay
+	if b.d.delayN > 0 {
+		if b.d.replays > b.d.delayN {
+			delay = 0
+		}
+	}
 	b.d.mu.Unlock()
 	time.Sleep(delay)
 	return nil
@@ -156,6 +162,7 @@ type guest struct {
 	m    mem
 	prov *fakeProvider
 	dev  *fakeDevice
+	mod  *Module
 }
 
 func newGuest(t *testing.T, caps []string, tune func(*Module, *fakeProvider)) *guest {
@@ -169,7 +176,7 @@ func newGuest(t *testing.T, caps []string, tune func(*Module, *fakeProvider)) *g
 	p := wasi.New(wasi.Config{FS: rootfs.New(), Caps: caps})
 	in := mod.Open(p)
 	t.Cleanup(in.Close)
-	return &guest{t: t, in: in, m: make(mem, 1<<20), prov: prov, dev: dev}
+	return &guest{t: t, in: in, m: make(mem, 1<<20), prov: prov, dev: dev, mod: mod}
 }
 
 // call runs one import to completion, as the executor does: waiting, then
@@ -506,8 +513,9 @@ func TestGPUTimeOverrun(t *testing.T) {
 		t.Error("the device was not destroyed")
 	}
 	// Every context of the container is lost with the device.
-	if e := g.submit(b, bufferFrame(t, 1, 64, webgpu.BufferUsageCopyDst, nil, nil), 4096, 0, 0); e != ContextLost {
-		t.Errorf("another context: %d", e)
+	// ... and the grant is revoked for good.
+	if e := g.submit(b, bufferFrame(t, 1, 64, webgpu.BufferUsageCopyDst, nil, nil), 4096, 0, 0); e != Revoked {
+		t.Errorf("another context: %d, want Revoked", e)
 	}
 }
 
