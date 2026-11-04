@@ -160,6 +160,10 @@ stores 1 into a host-owned flag and leaves the loop.
   sanctioned exactly like a timeout: grant revoked, `gpu-sanction` event with
   `cause=loop-budget` (`cause=time-budget` otherwise). There is nothing to
   drain: the work is already off the GPU.
+- **Work is per GPU.** 2^36 was measured on an Apple M4 Max. On a software
+  adapter (SwiftShader in CI) the same loop is about a thousand times slower,
+  so a hostile shader fits under the budget and is cut by the 2 s cap (layer 2)
+  instead; set `Browser.LoopWork` lower for such an adapter.
 - **Not covered.** Straight-line code (bounded already) and the dispatch size
   (layer 3). A module that also has a `@vertex` entry is not rewritten (a
   vertex stage cannot write storage). The older `wasi_webgpu` module (no

@@ -255,7 +255,12 @@ func TestBatchDeadline(t *testing.T) {
 		t.Fatalf("hang: exit %d (%s), stdout %q", h.Exit, h.Error, h.Stdout)
 	}
 	ms, _ := strconv.Atoi(m[1])
-	if loopBudgetOn() {
+	// A software adapter (SwiftShader) runs the same loop about a thousand
+	// times slower than the GPU the default Work was measured on, so the
+	// hostile shader fits under the budget and the 2 s cap cuts it instead:
+	// the loop budget's Work is per GPU (docs/gpu-scheduling.md).
+	soft := rep.Adapter.Fallback || strings.Contains(strings.ToLower(rep.Adapter.Architecture+rep.Adapter.Vendor), "swiftshader")
+	if loopBudgetOn() && !soft {
 		// Layer 4: the loop is cut, the host answers Truncated, well before
 		// the 2 s cap.
 		if ms > 1500 {
