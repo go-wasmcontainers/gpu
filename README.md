@@ -281,9 +281,34 @@ browser); as go-webengine's milestones land, the items turn green.
 Per-submit round trip seen from the guest, 30 interleaved rounds each, Apple
 M4 Max, 1-minute load 4 to 5, medians (read 4 KiB / read 1 MiB /
 compute+copy+read 4 KiB / 1 MiB): Chromium 151 360 / 1020 / 825 / 1235 us;
-Safari 27.2 340 / 1200 / 820 / 1340 us; Firefox 159 about 200 000 us for all
-four (go-wasmcontainers/gpu#25). Timers are quantised (20 us in Chromium and
-Safari), so differences under 100 us are noise.
+Safari 27.2 340 / 1200 / 820 / 1340 us (340 / 840 / 860 / 940 us in the
+2026-11-04 run below); Firefox 159 about 200 000 us for all four before
+go-wasmcontainers/gpu#25 was fixed, and 2 560 / 3 060 / 2 580 / 3 100 us after
+(go-gfx/webgpu v0.12.1). Timers are quantised (20 us in Chromium and Safari),
+so differences under 100 us are noise.
+
+Before / after the Firefox fix, same machine, 2026-11-04, 30 rounds, medians
+(read 4 KiB / read 1 MiB / compute+copy+read 4 KiB / 1 MiB, us), 1-minute load
+5.0 to 5.7 (the Firefox-before run ended at 8.2): Firefox 159 199 940 / 200 040
+/ 199 940 / 200 040 -> 2 560 / 3 060 / 2 580 / 3 100; Chromium 345 / 720 / 830
+/ 960 with the fix (the interleaved Chromium run without it was skipped by the
+load guard; the figures in the previous paragraph are its baseline). LLM
+decode (llm v0.3.1, SmolLM2-135M Q4_0, `TestLLMAB -p 128 -n 128`, load 7.1 to
+7.9, 2 rounds x 3 interleaved runs): Firefox 159 about 290 tok/s (3.4 ms/tok)
+with go-gfx/webgpu v0.12.1 and also with v0.12.0, Chromium about 550 tok/s
+(1.8 ms/tok). The default decode does not read back per token, so the fix does
+not move it; a one-read-per-token configuration (`-batch 1`) is not yet
+compared before/after.
+
+Why Firefox took 200 ms: it resolves `onSubmittedWorkDone` and `mapAsync` on
+the tick of a 100 ms timer (`WebGPUParent.cpp` `POLL_TIME_MS = 100`; Bugzilla
+1870699 "Don't poll WebGPU from a timer", assigned, a background-thread
+rewrite is in progress), and the host waited twice (work-done, then map). The
+control is `go run ./internal/cmd/ffwait` (a bare page, no engine, also in a
+Worker): every await costs 100 ms, an empty submit as a kick takes it to
+0.3 ms. go-gfx/webgpu v0.12.1 kicks the queue with an empty `submit([])`
+while it waits ([docs/readback.md](https://github.com/go-gfx/webgpu/blob/main/docs/readback.md)).
+When Firefox ships the fix the kick is a no-op.
 
 Safari: `GPU_E2E_BROWSER=safari go test -tags e2e ./e2e/` drives the real
 Safari through `safaridriver` (W3C WebDriver, `internal/webdriver`;
@@ -306,8 +331,9 @@ times out, a helper process is killed). Firefox hides the adapter's vendor
 and architecture, so the lane relies on `isFallbackAdapter`; it fails, never
 skips, when `requestAdapter` returns null. Firefox 159 offers `shader-f16`;
 the f32 path stays mandatory (older Firefox, other platforms). Known:
-a submit costs about 200 ms in Firefox 159 (quantised read-back), against
-well under 1 ms in Chromium (go-wasmcontainers/gpu#25); the longest
+a submit with a read-back cost about 200 ms in Firefox 159 (its 100 ms
+device-poll timer, twice), now about 2.6 ms with go-gfx/webgpu v0.12.1
+(go-wasmcontainers/gpu#25); the longest
 legitimate submit measured there is 226 ms, which is why the steady-state
 budget is 500 ms. Destroying a device does not cancel work the GPU already
 holds (go-wasmcontainers/gpu#26): a sanctioned container's remaining shader

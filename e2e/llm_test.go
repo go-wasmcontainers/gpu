@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mxschmitt/playwright-go"
 
@@ -87,65 +88,37 @@ func runLLMCases(t *testing.T, env llmEnv, cases []engineCase, extraArgs []strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	origin := fmt.Sprintf("http://localhost:%d", ln.Addr().(*net.TCPAddr).Port)
-	for i := range cases {
-		cases[i].Models = []engineModel{{Name: "smollm2-135m-instruct-q4_0", URL: origin + "/model.gguf", Size: env.size, SHA256: env.sum}}
-	}
-	cs, _ := json.Marshal(cases)
-	files := map[string][]byte{"index.html": []byte(enginePage), "engine.js": []byte(engineWorker), "wasm_exec.js": wasmExec,
-		"container-worker.js": browser.WorkerJS, "cases.json": cs}
+	files := map[string][]byte{"index.html": []byte(enginePage + reportPoster), "engine.js": []byte(engineWorker), "wasm_exec.js": wasmExec,
+		"container-worker.js": browser.WorkerJS}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(site, name), body, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	fs := http.FileServer(http.Dir(site))
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	port, reports := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 		w.Header().Set("Cross-Origin-Embedder-Policy", "require-corp")
 		fs.ServeHTTP(w, r)
-	})}
-	go srv.Serve(ln)
-	defer srv.Close()
-	pw, err := playwright.Run()
-	if err != nil {
+	}))
+	origin := fmt.Sprintf("http://localhost:%d", port)
+	for i := range cases {
+		cases[i].Models = []engineModel{{Name: "smollm2-135m-instruct-q4_0", URL: origin + "/model.gguf", Size: env.size, SHA256: env.sum}}
+	}
+	cs, _ := json.Marshal(cases)
+	if err := os.WriteFile(filepath.Join(site, "cases.json"), cs, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	defer pw.Stop()
-	channel := os.Getenv("GPU_E2E_CHANNEL")
-	if channel == "" {
-		channel = "chromium"
-	}
-	opts := playwright.BrowserTypeLaunchOptions{Headless: playwright.Bool(true), Channel: playwright.String(channel)}
-	opts.Args = append(append(opts.Args, strings.Fields(os.Getenv("GPU_E2E_ARGS"))...), extraArgs...)
-	b, err := pw.Chromium.Launch(opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer b.Close()
-	p, err := b.NewPage()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var console []string
-	p.On("console", func(m playwright.ConsoleMessage) { console = append(console, m.Text()) })
-	if _, err := p.Goto(origin + "/index.html" + pageQuery(0, 0)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.WaitForFunction("() => window.__report !== undefined", nil, playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(1800000)}); err != nil {
-		t.Fatalf("%v\nconsole: %s", err, strings.Join(console, "\n"))
-	}
-	v, _ := p.Evaluate("window.__report")
+	// Chromium (Playwright), real Firefox or Safari, as in the batch lanes
+	// (GPU_E2E_BROWSER); the page posts its report to the server.
+	v, version := fetchReport(t, port, reports, pageQuery(0, 0), extraArgs, 30*time.Minute)
+	t.Logf("browser %s", version)
 	var rep engineReport
-	if err := json.Unmarshal([]byte(v.(string)), &rep); err != nil {
+	if err := json.Unmarshal([]byte(v), &rep); err != nil {
 		t.Fatal(err)
 	}
 	if rep.Error != "" {
-		t.Fatalf("engine worker: %s\nconsole: %s", rep.Error, strings.Join(console, "\n"))
+		t.Fatalf("engine worker: %s", rep.Error)
 	}
 	if len(rep.Results) != len(cases) {
 		t.Fatalf("%d results for %d cases", len(rep.Results), len(cases))
@@ -155,9 +128,6 @@ func runLLMCases(t *testing.T, env llmEnv, cases []engineCase, extraArgs []strin
 	t.Logf("gpu time budget: %s", rep.GPU)
 	if rep.GPU.Sanctions != 0 {
 		t.Errorf("%d GPU sanction(s) on legitimate LLM work", rep.GPU.Sanctions)
-	}
-	if len(console) > 0 {
-		t.Logf("browser console:\n%s", strings.Join(console, "\n"))
 	}
 	return rep
 }
