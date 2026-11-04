@@ -319,8 +319,10 @@ func shaders() {
 		ok               bool
 	}{
 		{"valid control", shader, "", true},
-		{"reserved word", "@group(0) @binding(0) var<storage, read> meta: array<u32>;\n@compute @workgroup_size(1) fn main() { _ = meta[0]; }", "meta", false},
-		{"syntax error", "@compute @workgroup_size(1) fn main( { }", ")", false},
+		{"reserved word", "@group(0) @binding(0) var<storage, read> meta: array<u32>;\n@compute @workgroup_size(1) fn main() { _ = meta[0]; }", "1:42", false},
+		// want is the position of the error, which every browser reports
+		// (Chromium and Firefox name the token too, Safari does not).
+		{"syntax error", "@compute @workgroup_size(1) fn main( { }", "1:38", false},
 	}
 	bad := 0
 	for _, c := range cases {

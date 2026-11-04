@@ -240,9 +240,9 @@ by the same refusals, the drain probe was refused too (it retries until
 sanctioned. The load average was 12 to 19 during those runs, so the timing is
 not clean, but the adapter refusal is. On 2026-11-04 safaridriver could not
 start a Safari session at all ("timed out while connecting to a Safari
-instance"), so the run could not be repeated at a low load. It is tracked as an open defect
-(Safari's behaviour after a hung shader), not claimed as working; the Safari
-victim-latency figure is therefore **not measured**.
+instance"), so the run could not be repeated at a low load. Later the same
+day it could, with layer 4 on: see the end of this note, which locates what
+Safari does after its own watchdog trips.
 
 ### Layer 4: the same hostile/victim test, before and after
 
@@ -264,5 +264,28 @@ answer *truncated* (errno 14) once, are revoked (the next `context_create` answe
 carries `cause=loop-budget`. Zero truncations and zero fallbacks in every other
 test: on Chromium the whole e2e (`TestBatch*`, `TestContainersOnWebGPU`, `TestLLMOracle`, `TestLLMTrace`, `TestLLMShaders`, `TestLLMDecodeBreakdown`, `TestBrowserCapabilities`, `TestWebGPUBackend`), on
 Firefox the batch tests, `TestBrowserCapabilities` and `TestWebGPUBackend`.
-**Safari is not measured**: automation is disabled on this Mac (safaridriver
-cannot start a session, #32); the Safari acceptance stays open.
+
+**Safari 27.2 (safaridriver, Apple M4 Max, load 5)**: with layer 4 on, the
+victim's worst submit is **21.7 ms** (combined) and **69.0 ms** (split), the
+hostile is truncated after 44 to 65 ms and revoked, the victim is never
+sanctioned, and every batch test passes with zero truncations (the shader-error
+test now matches the error's position, `1:42` and `1:38`, because Safari's
+message does not name the token as Chromium's and Firefox's do).
+
+**Why Safari failed the hostile run in v0.10.0 (#32), located.** The control run
+(layer 4 off, budgets at 60 s, nobody sanctioned) is the one that cannot pass
+on Safari: the hostile's device is destroyed **by Safari itself** after 3.15 s
+of shader (`object destroyed`, the host did nothing; the host's `drains` stay at
+1), and the victim's submit, queued behind the hostile's work on the other
+device, **never completes**: it failed after 63.1 s, the host's 60 s budget, with
+`timeout` and the victim was sanctioned (event `gpu/sanction ... submit_ms=60006`).
+So the divergence is in what Safari does when its own watchdog trips: the
+other devices' pending `onSubmittedWorkDone` does not resolve. Chromium and
+Firefox finish the shader (4.5 s and 2.2 s). The host cannot cancel or repair
+that; it can only keep a shader from reaching Safari's watchdog, which layer 4
+does (cut at 65 ms, 50 times under 3.15 s). **Accepted, not fixed**: a shader the
+host does not rewrite (WGSL that does not parse, a module with a `@vertex`
+entry) or that fits under `LoopWork` on a slower GPU can still reach it, and
+then an innocent container queued behind it is sanctioned at the budget.
+`TestBatchSanction/control` is skipped on Safari for that reason; the Safari
+*before* figure is therefore the hang itself (63 s), not a latency.
