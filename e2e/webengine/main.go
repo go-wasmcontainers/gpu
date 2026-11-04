@@ -25,11 +25,11 @@ import (
 )
 
 type result struct {
-	Report  string   `json:"report"`
-	Partial string   `json:"partial"`
+	Report  string `json:"report"`
+	Partial string `json:"partial"`
 	// Budget holds the engine's "script cap reached" / "timer-job cap
 	// reached" log lines.
-	Budget []string `json:"budget"`
+	Budget  []string `json:"budget"`
 	Log     []string `json:"log"`
 	Title   string   `json:"title"`
 	Error   string   `json:"error"`
