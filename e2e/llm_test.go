@@ -86,15 +86,7 @@ func needLLM(t *testing.T) llmEnv {
 	if dir == "" || repo == "" {
 		t.Skip("LLM_MODELS and LLM_REPO are not set")
 	}
-<<<<<<< HEAD
-	file := llmModelFile
-	if v := os.Getenv("LLM_MODEL_FILE"); v != "" { // another model of the same family (Qwen2.5-0.5B)
-		file = v
-	}
-	p := filepath.Join(dir, file)
-=======
 	p := filepath.Join(dir, llmModelFile())
->>>>>>> origin/main
 	f, err := os.Open(p)
 	if err != nil {
 		t.Skip(err)
