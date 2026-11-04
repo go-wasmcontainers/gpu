@@ -293,7 +293,12 @@ Before / after the Firefox fix, same machine, 2026-11-04, 30 rounds, medians
 / 199 940 / 200 040 -> 2 560 / 3 060 / 2 580 / 3 100; Chromium 345 / 720 / 830
 / 960 with the fix (the interleaved Chromium run without it was skipped by the
 load guard; the figures in the previous paragraph are its baseline). LLM
-decoding on Firefox was not measured here.
+decode (llm v0.3.1, SmolLM2-135M Q4_0, `TestLLMAB -p 128 -n 128`, load 7.1 to
+7.9, 2 rounds x 3 interleaved runs): Firefox 159 about 290 tok/s (3.4 ms/tok)
+with go-gfx/webgpu v0.12.1 and also with v0.12.0, Chromium about 550 tok/s
+(1.8 ms/tok). The default decode does not read back per token, so the fix does
+not move it; a one-read-per-token configuration (`-batch 1`) is not yet
+compared before/after.
 
 Why Firefox took 200 ms: it resolves `onSubmittedWorkDone` and `mapAsync` on
 the tick of a 100 ms timer (`WebGPUParent.cpp` `POLL_TIME_MS = 100`; Bugzilla
