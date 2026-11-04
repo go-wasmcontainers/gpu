@@ -318,7 +318,13 @@ func TestBatchSanction(t *testing.T) {
 	// wait either.
 	for _, mode := range []string{"control", "combined", "split"} {
 		t.Run(mode, func(t *testing.T) {
+			// The combined frame is held to the 2 s cap, and the calibration is
+			// coarse (Firefox resolves a submit in 200 ms steps: a "3 s" shader
+			// ran 1.3 s once), so it aims higher to be sure to pass the cap.
 			args := []string{"3000"}
+			if mode != "split" {
+				args = []string{"4500"}
+			}
 			if mode == "split" {
 				args = append(args, "split")
 			}

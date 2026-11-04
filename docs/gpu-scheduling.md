@@ -145,19 +145,20 @@ victim's **worst submit**:
 
 | run | Chromium 151 | Firefox 159 |
 |---|---|---|
-| control (no sanction: the victim waits the shader out) | 7,462 ms (load 6 to 8) | 3,189 and 7,109 ms |
-| combined (creation and dispatch in one frame; sanction at the 2 s cap) | 3,052 ms (load 4 to 5, first build); 4,175 ms (load 6 to 8) | 3,475 and 3,161 ms |
-| split (dispatch in a frame of its own; sanction at the budget) | 2,949 ms (load 4 to 5, budget then 250 ms); 5,066 ms (load 6 to 8) | 9,301 and 8,906 ms: not comparable, the shader itself ran about 9 s (see below) |
+| control (no sanction: the victim waits the shader out; shader aimed at 4.5 s) | 4,516 ms | 2,076 ms |
+| combined (creation and dispatch in one frame; sanction at the 2 s cap; aimed at 4.5 s) | 4,526 ms | 3,876 ms |
+| split (dispatch in a frame of its own; sanction at 500 ms; aimed at 3 s) | 3,031 ms | 3,176 ms |
+
+These are runs at a 1-minute load of 3 to 4. The victim's median submit was
+1.2 to 1.3 ms in Chromium and 175 to 274 ms in Firefox (its 200 ms floor).
+The shader's real length varies with the GPU's other users and, in Firefox,
+with a calibration that sees work only in 200 ms steps (a "3 s" shader ran
+1.3 s once, 9 s at load 8): the e2e therefore logs the victim's worst
+latency and only asserts that it is below the run's length, and the combined
+run aims at 4.5 s so that it passes the 2 s cap.
 
 What the numbers say: the victim's latency is the hostile shader's remaining
-length, and the shader's length changes with whatever else uses the GPU (the
-same "3 s" shader ran 3.0 s or 7.5 s in Chromium, on this shared machine).
-On Firefox a submit resolves in 200 ms steps, so the hostile's calibration
-(which stops at 40 ms of work to stay far under the budget) cannot see work
-below 200 ms and overshoots: its "3 s" split shader ran about 9 s. The e2e
-therefore logs the victim's worst latency and only asserts that it is below
-the run's length.
-Sanctioning does not shorten it, and does not lengthen it; what it changes is
+length. Sanctioning does not shorten it, and does not lengthen it; what it changes is
 that the victim is **never sanctioned itself** (0 errors in every run, one
 sanction in the whole module), that the hostile container gets no GPU after
 its first overrun (the next `context_create` answers *revoked*, asserted),
@@ -177,6 +178,8 @@ got *unsupported*). With the default budget, the sanction at 2 s was followed
 by the same refusals, the drain probe was refused too (it retries until
 `DrainTime`), and the next container that did get a device was itself
 sanctioned. The load average was 12 to 19 during those runs, so the timing is
-not clean, but the adapter refusal is. It is tracked as an open defect
+not clean, but the adapter refusal is. On 2026-11-04 safaridriver could not
+start a Safari session at all ("timed out while connecting to a Safari
+instance"), so the run could not be repeated at a low load. It is tracked as an open defect
 (Safari's behaviour after a hung shader), not claimed as working; the Safari
 victim-latency figure is therefore **not measured**.
