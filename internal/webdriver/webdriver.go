@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -24,7 +25,15 @@ const maxResponse = 1 << 20
 type Client struct {
 	Base string // http://127.0.0.1:port
 	HTTP *http.Client
+	// PairedWait is how long NewSession keeps asking while Safari answers
+	// that it is "already paired with another WebDriver session": Safari
+	// releases the previous session some time after its DELETE, so a test
+	// that follows another one is refused for a moment. 0 asks once.
+	PairedWait time.Duration
 }
+
+// pairedPoll is how often NewSession asks again while Safari is paired.
+var pairedPoll = 250 * time.Millisecond
 
 // Error is a WebDriver error response (W3C section 6.6).
 type Error struct {
@@ -93,8 +102,23 @@ type Session struct {
 }
 
 // NewSession creates a session; caps is the alwaysMatch capabilities object.
+// While Safari is still paired with a previous session it asks again, for
+// at most PairedWait; any other refusal is returned at once.
 func (c *Client) NewSession(ctx context.Context, caps map[string]any) (*Session, error) {
-	v, err := c.do(ctx, http.MethodPost, "/session", map[string]any{"capabilities": map[string]any{"alwaysMatch": caps}})
+	deadline := time.Now().Add(c.PairedWait)
+	var v json.RawMessage
+	var err error
+	for {
+		v, err = c.do(ctx, http.MethodPost, "/session", map[string]any{"capabilities": map[string]any{"alwaysMatch": caps}})
+		if err == nil || !isPaired(err) || !time.Now().Before(deadline) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(pairedPoll):
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +132,12 @@ func (c *Client) NewSession(ctx context.Context, caps map[string]any) (*Session,
 		return nil, fmt.Errorf("webdriver: no session id in %.200s", v)
 	}
 	return &Session{c: c, ID: r.SessionID, Version: r.Capabilities.BrowserVersion}, nil
+}
+
+// isPaired reports Safari's refusal while a previous session still holds it.
+func isPaired(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.Code == "session not created" && strings.Contains(e.Message, "already paired")
 }
 
 // Navigate loads url.
@@ -141,7 +171,7 @@ func Start(ctx context.Context, driver string) (c *Client, stop func(), err erro
 		return nil, nil, err
 	}
 	stop = func() { cmd.Process.Kill(); cmd.Wait() }
-	c = &Client{Base: fmt.Sprintf("http://127.0.0.1:%d", port), HTTP: &http.Client{Timeout: 2 * time.Minute}}
+	c = &Client{Base: fmt.Sprintf("http://127.0.0.1:%d", port), HTTP: &http.Client{Timeout: 2 * time.Minute}, PairedWait: 30 * time.Second}
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		if _, err := c.do(ctx, http.MethodGet, "/status", nil); err == nil {

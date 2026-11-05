@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fake is a minimal W3C WebDriver server.
@@ -76,6 +77,64 @@ func TestErrorResponse(t *testing.T) {
 	var e *Error
 	if !errors.As(err, &e) || e.Status != 500 || e.Code != "session not created" || !strings.Contains(e.Message, "Allow Remote Automation") {
 		t.Fatalf("error %v", err)
+	}
+}
+
+// paired answers "already paired" to the first refusals POST /session, then
+// creates the session.
+func paired(t *testing.T, refusals int, posts *int) *Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*posts++
+		if *posts <= refusals {
+			w.WriteHeader(500)
+			io.WriteString(w, `{"value":{"error":"session not created","message":"Could not create a session: The Safari instance is already paired with another WebDriver session.","stacktrace":""}}`)
+			return
+		}
+		io.WriteString(w, `{"value":{"sessionId":"S2","capabilities":{}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	return &Client{Base: srv.URL}
+}
+
+func TestPairedRetried(t *testing.T) {
+	defer func(p time.Duration) { pairedPoll = p }(pairedPoll)
+	pairedPoll = time.Millisecond
+	posts := 0
+	c := paired(t, 3, &posts)
+	c.PairedWait = 10 * time.Second
+	s, err := c.NewSession(context.Background(), nil)
+	if err != nil || s.ID != "S2" || posts != 4 {
+		t.Fatalf("session %+v, err %v, %d requests; want S2 after 4", s, err, posts)
+	}
+}
+
+func TestPairedGivesUp(t *testing.T) {
+	defer func(p time.Duration) { pairedPoll = p }(pairedPoll)
+	pairedPoll = time.Millisecond
+	posts := 0
+	c := paired(t, 1<<30, &posts)
+	c.PairedWait = 50 * time.Millisecond
+	_, err := c.NewSession(context.Background(), nil)
+	if !isPaired(err) || posts < 2 {
+		t.Fatalf("err %v after %d requests; want the paired refusal after retrying", err, posts)
+	}
+}
+
+func TestPairedWaitZeroAsksOnce(t *testing.T) {
+	posts := 0
+	c := paired(t, 1, &posts)
+	if _, err := c.NewSession(context.Background(), nil); !isPaired(err) || posts != 1 {
+		t.Fatalf("err %v after %d requests; want one refused request", err, posts)
+	}
+}
+
+func TestOtherRefusalNotRetried(t *testing.T) {
+	var got []string
+	c := fake(t, &got)
+	c.PairedWait = 10 * time.Second
+	if _, err := c.NewSession(context.Background(), map[string]any{"browserName": "Chrome"}); err == nil || len(got) != 1 {
+		t.Fatalf("err %v after %d requests; want one refused request", err, len(got))
 	}
 }
 
