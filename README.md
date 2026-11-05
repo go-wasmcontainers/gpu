@@ -274,12 +274,12 @@ on SwiftShader (labelled fallback: proves the WGSL, not a GPU).
 | Firefox | Linux | not supported (MDN browser-compat-data `api.GPU`, bug 2006676) | none |
 | Safari 27.2 | macOS 27, Apple M4 Max | yes (since 26), adapter reported as vendor `apple`, architecture `apple`, not a fallback; `shader-f16` yes, `subgroups` no here | passes locally through safaridriver (batch module, refusals, quota, 123/123 ONNX cases, MNIST-12 within 3.1e-5; no GPU sanction on legitimate work, longest submit 11.7 ms; **the hostile-shader run does not pass**: WebKit's own watchdog destroys a 3 s shader and then refuses adapters, see docs/gpu-scheduling.md) |
 | Safari 27.2 / 26.6.2 | GitHub macOS runners (`macos-15`, `macos-26`; virtual machines) | no: `macos-15` has no `navigator.gpu`, `macos-26` answers `requestAdapter` with null | no CI lane (the lane fails there; WebKit excludes VMs) |
-| go-webengine engine v0.26.0 | pure Go, any platform | no: Worker, SharedArrayBuffer, Atomics.wait, crossOriginIsolated, OPFS, OffscreenCanvas and navigator.gpu are all missing; WebAssembly, `instantiateStreaming` and `fetch` work | **expected red** until go-webengine M3 (Workers, SAB/Atomics, COOP/COEP) and M5 (navigator.gpu); non-blocking CI job |
+| go-webengine engine v0.30.0 | pure Go, any platform | no WebGPU: since v0.30.0 Worker, SharedArrayBuffer and its views, Atomics, posting a SAB or a view, crossOriginIsolated (and its negative control: none without COOP/COEP), unsolicited worker messages, WebAssembly and `fetch` are green; OPFS, OffscreenCanvas and navigator.gpu are missing | **expected red** until go-webengine M4 (OPFS) and M5 (navigator.gpu); non-blocking CI job |
 
 The go-webengine lane (`GPU_E2E_BROWSER=webengine go test -tags e2e ./e2e/`)
 renders the test pages with `engine.New()`, `EnableDoneSignal`, raised wasm
 caps and `JSLog` captured (the driver is `e2e/webengine`, a module of its own
-pinned to engine v0.26.0, so this module's dependency graph does not grow).
+pinned to engine v0.30.0, so this module's dependency graph does not grow).
 It fails, never skips, and every failure names the missing capabilities
 ("no Worker", "no navigator.gpu", ...) from a probe page that reports each
 item separately (`TestBrowserCapabilities` runs the same probe on any
