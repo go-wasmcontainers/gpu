@@ -46,11 +46,22 @@ func main() {
 	timeout := flag.Duration("timeout", 60*time.Second, "script budget (JSTimeout)")
 	flag.Parse()
 	var res result
-	res.Version = "go-webengine/engine v0.30.0"
+	res.Version = "go-webengine/engine v0.34.0"
 	var mu sync.Mutex
 	e := engine.New()
 	e.EnableDoneSignal = true
 	e.EnableWorkerStreaming = true // a live loop for a worker's unsolicited messages (v0.30.0)
+	// navigator.gpu, WebGPU compute through Metal (v0.34.0, M5), off by default.
+	e.EnableWebGPU = true
+	// OPFS (v0.31.0, M4), off unless given a root: one per run, removed after.
+	opfs, err := os.MkdirTemp("", "gpu-e2e-opfs-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(opfs)
+	e.OPFSRoot = opfs
+	e.MaxOPFSBytes = 256 << 20
 	e.JSTimeout = *timeout
 	e.MaxWasmModuleBytes = 512 << 20
 	e.MaxWasmMemoryBytes = 2 << 30

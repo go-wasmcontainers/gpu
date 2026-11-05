@@ -3,10 +3,12 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -164,10 +166,15 @@ type capReport struct {
 	} `json:"caps"`
 }
 
+// informational capabilities are listed by the probe but required by no e2e
+// page and by no part of go-wasmcontainers/engine: OffscreenCanvas is for
+// drawing, and these lanes only compute.
+var informational = map[string]bool{"OffscreenCanvas": true}
+
 func (c capReport) missing() []string {
 	var m []string
 	for _, x := range c.Caps {
-		if !x.OK {
+		if !x.OK && !informational[x.Name] {
 			m = append(m, "no "+x.Name)
 		}
 	}
@@ -188,11 +195,26 @@ type engineRun struct {
 // go-webengine/engine v0.30.0) on url.
 func renderInEngine(t *testing.T, url string, timeout time.Duration) engineRun {
 	t.Helper()
-	cmd := exec.Command("go", "run", ".", "-url", url, "-timeout", timeout.String())
-	cmd.Dir = "webengine"
+	// The driver is built, then run itself: killing a `go run` kills the go
+	// command and leaves the program it started running. Past the script
+	// budget plus a minute the driver is killed, so a page the engine never
+	// finishes fails this test instead of the whole package's -timeout.
+	bin := filepath.Join(t.TempDir(), "webengine")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = "webengine"
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go-webengine driver build: %v\n%s", err, out)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout+time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "-url", url, "-timeout", timeout.String())
+	cmd.WaitDelay = 5 * time.Second
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		t.Fatalf("go-webengine driver killed after %v: the engine did not finish the page", timeout+time.Minute)
+	}
 	if err != nil {
 		t.Fatalf("go-webengine driver: %v\n%s", err, stderr.String())
 	}
@@ -201,6 +223,14 @@ func renderInEngine(t *testing.T, url string, timeout time.Duration) engineRun {
 		t.Fatalf("go-webengine driver output: %v\n%.500s", err, out)
 	}
 	return r
+}
+
+// lastN is the last n lines of a console log.
+func lastN(log []string, n int) []string {
+	if len(log) > n {
+		return log[len(log)-n:]
+	}
+	return log
 }
 
 // runWebengine is the go-webengine lane (GPU_E2E_BROWSER=webengine). It first
@@ -279,7 +309,7 @@ func runWebengine(t *testing.T, port int, reports <-chan string, url string, tim
 		t.Fatalf("%s: %s\nconsole: %q", r.Version, r.Error, r.Log)
 	}
 	if len(r.Budget) > 0 {
-		t.Fatalf("%s: timer budget exhausted: %s", r.Version, strings.Join(r.Budget, "; "))
+		t.Fatalf("%s: timer budget exhausted: %s\nconsole (last 40): %q", r.Version, strings.Join(r.Budget, "; "), lastN(r.Log, 40))
 	}
 	if r.Report == "" {
 		t.Fatalf("%s: the page did not call __webengineDone within %v\nconsole: %q", r.Version, timeout, r.Log)
