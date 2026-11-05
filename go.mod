@@ -3,7 +3,7 @@ module github.com/go-wasmcontainers/gpu
 go 1.27.3
 
 require (
-	github.com/go-gfx/webgpu v0.12.0
+	github.com/go-gfx/webgpu v0.14.0
 	github.com/go-virtio/gpu v0.10.0
 	github.com/go-wasmcontainers/engine v0.34.0
 	github.com/mxschmitt/playwright-go v0.6201.1
@@ -13,7 +13,7 @@ require (
 
 require (
 	github.com/deckarep/golang-set/v2 v2.8.0 // indirect
-	github.com/go-gfx/wgsl v0.2.1 // indirect
+	github.com/go-gfx/wgsl v0.3.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.20.3 // indirect

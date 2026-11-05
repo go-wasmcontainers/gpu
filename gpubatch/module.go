@@ -85,6 +85,14 @@ const (
 	// context is lost and the grant is revoked, as for Timeout; the engine
 	// emits a "sanction" event with kind "truncated".
 	Truncated Errno = 14
+	// Unbounded: the host cannot bound the module's loops, so it does not run
+	// it: the WGSL does not parse with the host's parser though the browser
+	// accepts it, it has a loop in a module with a vertex or fragment entry
+	// point, or the browser refused the loop-budget rewrite (for example a
+	// shader that already binds as many storage buffers as the device allows:
+	// the capset reports one less). The context is lost, the grant is not
+	// revoked; last_error says which.
+	Unbounded Errno = 15
 )
 
 // MaxErrorMessage bounds the text last_error returns.
@@ -606,6 +614,18 @@ func (in *instance) runSubmit(c *gctx, frame, window []byte) Errno {
 		return e
 	case <-timer.C:
 		el := time.Since(t0)
+		if lw, ok := in.m.Provider.(LossWatcher); ok {
+			if lt := lw.LastBrowserLoss(); !lt.IsZero() && lt.After(t0.Add(-CollateralWindow)) {
+				// Not an overrun of this container: the browser destroyed
+				// another device (its watchdog) and this submit, queued
+				// behind it, may never complete (Safari does that, #32).
+				// The device is reset, the grant kept.
+				in.m.record(func(s *Stats) { s.Resets++ })
+				in.resetDevice(el, budget)
+				rel(nil)
+				return ContextLost
+			}
+		}
 		kind := "stream"
 		if creates {
 			kind = "create"
@@ -650,6 +670,32 @@ func (in *instance) sanction(el, budget time.Duration, frame, cause, reason stri
 	}
 }
 
+// LossWatcher is a Provider that knows when the browser (not the host) last
+// destroyed one of its devices.
+type LossWatcher interface {
+	LastBrowserLoss() time.Time
+}
+
+// CollateralWindow is how far before a submit's turn a browser loss of
+// another device still explains that the submit never completed.
+const CollateralWindow = 10 * time.Second
+
+// resetDevice destroys the container's device without revoking its grant, and
+// forgets it: the next context_create opens a new one. Every context is lost
+// (ContextLost, which is what a guest answers by recreating its context).
+func (in *instance) resetDevice(el, budget time.Duration) {
+	in.loseDevice()
+	in.mu.Lock()
+	in.dev = nil
+	in.mu.Unlock()
+	if in.proc != nil {
+		in.proc.Emit("gpu", "device-reset", map[string]string{
+			"reason":    "the browser destroyed another container's device while this submit waited; this container's device is reset, its GPU grant is kept",
+			"submit_ms": strconv.FormatInt(el.Milliseconds(), 10), "budget_ms": strconv.FormatInt(budget.Milliseconds(), 10),
+		})
+	}
+}
+
 // loseDevice destroys the container's device: every context is lost, and
 // the module opens no new device.
 func (in *instance) loseDevice() {
@@ -678,6 +724,7 @@ func (in *instance) runFrame(c *gctx, msgs []wgpubatch.Message, lim wgpubatch.Li
 			c.c.Close()
 		}
 	}()
+	defer in.recordLoop(c) // a refusal is counted too
 	for _, msg := range msgs {
 		var err error
 		switch msg.Type {
@@ -701,6 +748,14 @@ func (in *instance) runFrame(c *gctx, msgs []wgpubatch.Message, lim wgpubatch.Li
 		}
 		if err != nil {
 			c.setError(err)
+			if e := errno(err); e == Unbounded || e == Reserved {
+				// What the host refused, and why, for whoever runs the
+				// container (the guest has last_error).
+				if in.proc != nil {
+					in.proc.Emit("gpu", "refused", map[string]string{"errno": strconv.Itoa(int(e)), "reason": strings.ToValidUTF8(err.Error()[:min(len(err.Error()), 600)], "")})
+				}
+				return e
+			}
 			return errno(err)
 		}
 	}
@@ -712,22 +767,22 @@ func (in *instance) runFrame(c *gctx, msgs []wgpubatch.Message, lim wgpubatch.Li
 
 // loopStats are layer 4's counters of one backend.
 type loopStats struct {
-	modules, rewritten, fallbacks int
-	spent                         time.Duration
+	modules, rewritten, refused int
+	spent                       time.Duration
 }
 
 // recordLoop adds to the module's Stats what layer 4 did since the last frame
 // of the context (the backend, if it has a loop budget, keeps the totals).
 func (in *instance) recordLoop(c *gctx) {
 	lb, ok := c.be.(interface {
-		LoopBudgetStats() (modules, rewritten, fallbacks int, spent time.Duration)
+		LoopBudgetStats() (modules, rewritten, refused int, spent time.Duration)
 	})
 	if !ok {
 		return
 	}
 	var now loopStats
-	now.modules, now.rewritten, now.fallbacks, now.spent = lb.LoopBudgetStats()
-	d := loopStats{now.modules - c.loop.modules, now.rewritten - c.loop.rewritten, now.fallbacks - c.loop.fallbacks, now.spent - c.loop.spent}
+	now.modules, now.rewritten, now.refused, now.spent = lb.LoopBudgetStats()
+	d := loopStats{now.modules - c.loop.modules, now.rewritten - c.loop.rewritten, now.refused - c.loop.refused, now.spent - c.loop.spent}
 	c.loop = now
 	if d == (loopStats{}) {
 		return
@@ -735,7 +790,7 @@ func (in *instance) recordLoop(c *gctx) {
 	in.m.record(func(s *Stats) {
 		s.LoopModules += int64(d.modules)
 		s.LoopRewritten += int64(d.rewritten)
-		s.LoopFallbacks += int64(d.fallbacks)
+		s.LoopRefused += int64(d.refused)
 		s.LoopSpent += d.spent
 	})
 }
@@ -784,6 +839,8 @@ func errno(err error) Errno {
 		return Truncated
 	case errors.Is(err, batch.ErrReserved):
 		return Reserved
+	case errors.Is(err, batch.ErrUnbounded):
+		return Unbounded
 	case errors.Is(err, batch.ErrInvalid):
 		return InvalidShader
 	case errors.As(err, &q):

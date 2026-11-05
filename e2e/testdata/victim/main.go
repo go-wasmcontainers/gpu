@@ -42,34 +42,59 @@ func main() {
 			pause = time.Duration(n) * time.Millisecond
 		}
 	}
-	s, err := batchsink.Open()
+	const n = 1024
+	var s *batchsink.Sink
+	var d *webgpu.Device
+	var pipe *webgpu.ComputePipeline
+	var bg *webgpu.BindGroup
+	var src, dst *webgpu.Buffer
+	// open makes the victim's context and objects; it is also what the victim
+	// does when the host reset its device (errno ContextLost: another
+	// container's device was destroyed by the browser, go-wasmcontainers/gpu#32).
+	open := func() error {
+		var err error
+		if s, err = batchsink.Open(); err != nil {
+			return err
+		}
+		d = s.Device("victim")
+		m, err := d.CreateShaderModule(webgpu.ShaderModuleDescriptor{Code: shader})
+		if err != nil {
+			return err
+		}
+		bgl, err := d.CreateBindGroupLayout(webgpu.BindGroupLayoutDescriptor{Entries: []webgpu.BindGroupLayoutEntry{
+			{Binding: 0, Visibility: webgpu.ShaderStageCompute, Buffer: &webgpu.BufferBindingLayout{Type: webgpu.BufferBindingTypeStorage}}}})
+		if err != nil {
+			return err
+		}
+		pl, err := d.CreatePipelineLayout(webgpu.PipelineLayoutDescriptor{BindGroupLayouts: []*webgpu.BindGroupLayout{bgl}})
+		if err != nil {
+			return err
+		}
+		if src, err = d.CreateBuffer(webgpu.BufferDescriptor{Size: 4 * n, Usage: webgpu.BufferUsageStorage | webgpu.BufferUsageCopySrc}); err != nil {
+			return err
+		}
+		if dst, err = d.CreateBuffer(webgpu.BufferDescriptor{Size: 4 * n, Usage: webgpu.BufferUsageMapRead | webgpu.BufferUsageCopyDst}); err != nil {
+			return err
+		}
+		if pipe, err = d.CreateComputePipeline(webgpu.ComputePipelineDescriptor{Layout: pl, Compute: webgpu.ProgrammableStage{Module: m, EntryPoint: "main"}}); err != nil {
+			return err
+		}
+		if bg, err = d.CreateBindGroup(webgpu.BindGroupDescriptor{Layout: bgl, Entries: []webgpu.BindGroupEntry{{Binding: 0, Buffer: src}}}); err != nil {
+			return err
+		}
+		return s.Flush()
+	}
+	err := open()
 	var be *batchsink.Error
 	if errors.Is(err, batchsink.ErrUnavailable) || errors.As(err, &be) && (be.Errno == batchsink.Denied || be.Errno == batchsink.Unsupported) {
 		fmt.Println("no GPU:", err)
 		os.Exit(2)
 	}
 	must(err)
-	defer s.Close()
-	d := s.Device("victim")
-	const n = 1024
-	m, err := d.CreateShaderModule(webgpu.ShaderModuleDescriptor{Code: shader})
-	must(err)
-	bgl, err := d.CreateBindGroupLayout(webgpu.BindGroupLayoutDescriptor{Entries: []webgpu.BindGroupLayoutEntry{
-		{Binding: 0, Visibility: webgpu.ShaderStageCompute, Buffer: &webgpu.BufferBindingLayout{Type: webgpu.BufferBindingTypeStorage}}}})
-	must(err)
-	pl, err := d.CreatePipelineLayout(webgpu.PipelineLayoutDescriptor{BindGroupLayouts: []*webgpu.BindGroupLayout{bgl}})
-	must(err)
-	src, err := d.CreateBuffer(webgpu.BufferDescriptor{Size: 4 * n, Usage: webgpu.BufferUsageStorage | webgpu.BufferUsageCopySrc})
-	must(err)
-	dst, err := d.CreateBuffer(webgpu.BufferDescriptor{Size: 4 * n, Usage: webgpu.BufferUsageMapRead | webgpu.BufferUsageCopyDst})
-	must(err)
-	pipe, err := d.CreateComputePipeline(webgpu.ComputePipelineDescriptor{Layout: pl, Compute: webgpu.ProgrammableStage{Module: m, EntryPoint: "main"}})
-	must(err)
-	bg, err := d.CreateBindGroup(webgpu.BindGroupDescriptor{Layout: bgl, Entries: []webgpu.BindGroupEntry{{Binding: 0, Buffer: src}}})
-	must(err)
+	defer func() { s.Close() }()
 
 	var lat []float64
-	bad := 0
+	bad, resets := 0, 0
 	for start := time.Now(); time.Since(start) < dur; time.Sleep(pause) {
 		rec := d.NewRecorder()
 		p := rec.BeginComputePass()
@@ -87,6 +112,23 @@ func main() {
 		}
 		ms := float64(time.Since(t0).Microseconds()) / 1000
 		lat = append(lat, ms)
+		if errors.As(err, &be) && be.Errno == batchsink.ContextLost {
+			// the host reset the device (not a sanction): start again
+			resets++
+			fmt.Printf("victim: submit %d answered context-lost after %.1f ms: opening a new context\n", len(lat), ms)
+			s.Close()
+			for try := 0; try < 240; try++ { // Safari answers no adapter for a while after its watchdog
+				if err = open(); err == nil {
+					break
+				}
+				time.Sleep(200 * time.Millisecond)
+			}
+			if err != nil {
+				fmt.Printf("victim: reopening failed: %v\n", err)
+				bad++
+			}
+			continue
+		}
 		if err != nil {
 			fmt.Printf("victim: submit %d failed after %.1f ms: %v\n", len(lat), ms, err)
 			bad++
@@ -105,7 +147,7 @@ func main() {
 	}
 	sorted := slices.Clone(lat)
 	slices.Sort(sorted)
-	fmt.Printf("victim: %d submits, median %.1f ms, max %.1f ms, errors %d\n", len(lat), sorted[len(sorted)/2], sorted[len(sorted)-1], bad)
+	fmt.Printf("victim: %d submits, median %.1f ms, max %.1f ms, errors %d, resets %d\n", len(lat), sorted[len(sorted)/2], sorted[len(sorted)-1], bad, resets)
 	if bad > 0 {
 		os.Exit(1)
 	}

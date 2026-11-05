@@ -113,6 +113,7 @@ func FuzzBatchCalls(f *testing.F) {
 			}
 			// Where may the call have written?
 			lo, hi := uint64(0), uint64(0)
+			lo2, hi2 := uint64(0), uint64(0) // a second window (last_error writes its length and its text)
 			switch fn {
 			case fnCaps:
 				lo, hi = args[0], args[0]+wgpubatch.CapsSizeV2
@@ -120,13 +121,16 @@ func FuzzBatchCalls(f *testing.F) {
 				lo, hi = args[0], args[0]+4
 			case fnSubmit:
 				lo, hi = args[3], args[3]+args[4]
+			case fnLastError: // last_error(ctx, buf, len, out)
+				lo, hi = args[1], args[1]+args[2]
+				lo2, hi2 = args[3], args[3]+4
 			}
 			for i := range m {
-				if (uint64(i) < lo || uint64(i) >= hi) && m[i] != before[i] {
+				if (uint64(i) < lo || uint64(i) >= hi) && (uint64(i) < lo2 || uint64(i) >= hi2) && m[i] != before[i] {
 					t.Fatalf("function %d wrote guest byte %d outside [%d, %d)", fn, i, lo, hi)
 				}
 			}
-			if r.Ret > uint64(Revoked) {
+			if r.Ret > uint64(Unbounded) { // the last errno
 				t.Fatalf("function %d returned %d", fn, r.Ret)
 			}
 		}

@@ -44,15 +44,15 @@ type gpuStats struct {
 	MaxDispatchInvocations          uint64
 	// Layer 4: submits cut by the loop budget, WGSL modules parsed and
 	// rewritten, rewrites the browser refused, and the time spent.
-	Truncations, LoopModules, LoopRewritten, LoopFallbacks int64
-	LoopSpent                                              int64
+	Truncations, LoopModules, LoopRewritten, LoopRefused int64
+	LoopSpent                                            int64
 }
 
 func (s gpuStats) String() string {
 	ms := func(ns int64) string { return strconv.FormatFloat(float64(ns)/1e6, 'f', 1, 64) + " ms" }
 	return fmt.Sprintf("%d submits, %d sanctions (%d loop-budget truncations), %d drains; max submit %s (stream-only %s, with creations %s), max wait for a turn %s, max stream %d invocations, max dispatch %d invocations; loop budget: %d modules, %d rewritten, %d refused after the rewrite, %s in the rewriter",
 		s.Submits, s.Sanctions, s.Truncations, s.Drains, ms(s.MaxSubmit), ms(s.MaxStream), ms(s.MaxCreate), ms(s.MaxWait), s.MaxInvocations, s.MaxDispatchInvocations,
-		s.LoopModules, s.LoopRewritten, s.LoopFallbacks, ms(s.LoopSpent))
+		s.LoopModules, s.LoopRewritten, s.LoopRefused, ms(s.LoopSpent))
 }
 
 type engineModel struct {
@@ -251,7 +251,7 @@ func TestContainersOnWebGPU(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rep.Error != "" {
-		t.Fatalf("engine worker: %s", rep.Error)
+		t.Fatalf("engine worker: %s\nconsole: %s", rep.Error, strings.Join(console, "\n"))
 	}
 	// The page keeps talking to the worker after the report (a frame
 	// acknowledgement or an input event can still be in flight, as from a

@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mxschmitt/playwright-go"
 
@@ -34,7 +35,43 @@ import (
 //
 // and skip cleanly without them.
 
-const llmModelFile = "SmolLM2-135M-Instruct-Q4_0.gguf"
+const llmDefaultModelFile = "SmolLM2-135M-Instruct-Q4_0.gguf"
+
+// The model under test: LLM_MODEL_FILE (the GGUF in LLM_MODELS), LLM_REGISTRY_NAME
+// (the name under /models), LLM_ORACLE_FILE (testdata/ of the llm repository)
+// and LLM_GPU_MEMORY (MiB) default to SmolLM2-135M Q4_0, so the SmolLM2 runs
+// are unchanged; set them for another model, e.g. Qwen2.5-0.5B:
+//
+//	LLM_MODEL_FILE=qwen2.5-0.5b-instruct-q4_0.gguf LLM_REGISTRY_NAME=qwen2.5-0.5b-instruct-q4_0
+//	LLM_ORACLE_FILE=oracle-qwen2.5-0.5b-dequant-f32.json LLM_GPU_MEMORY=1024
+func llmModelFile() string {
+	if v := os.Getenv("LLM_MODEL_FILE"); v != "" {
+		return v
+	}
+	return llmDefaultModelFile
+}
+
+func llmRegistryName() string {
+	if v := os.Getenv("LLM_REGISTRY_NAME"); v != "" {
+		return v
+	}
+	return "smollm2-135m-instruct-q4_0"
+}
+
+func llmOracleFile() string {
+	if v := os.Getenv("LLM_ORACLE_FILE"); v != "" {
+		return v
+	}
+	return "oracle-smollm2-135m-dequant-f32.json"
+}
+
+// llmGPUMemory is the container's GPU memory grant, in bytes.
+func llmGPUMemory() int64 {
+	if v, _ := strconv.Atoi(os.Getenv("LLM_GPU_MEMORY")); v > 0 {
+		return int64(v) << 20
+	}
+	return 512 << 20
+}
 
 type llmEnv struct {
 	model string
@@ -49,7 +86,7 @@ func needLLM(t *testing.T) llmEnv {
 	if dir == "" || repo == "" {
 		t.Skip("LLM_MODELS and LLM_REPO are not set")
 	}
-	p := filepath.Join(dir, llmModelFile)
+	p := filepath.Join(dir, llmModelFile())
 	f, err := os.Open(p)
 	if err != nil {
 		t.Skip(err)
@@ -87,65 +124,40 @@ func runLLMCases(t *testing.T, env llmEnv, cases []engineCase, extraArgs []strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	origin := fmt.Sprintf("http://localhost:%d", ln.Addr().(*net.TCPAddr).Port)
-	for i := range cases {
-		cases[i].Models = []engineModel{{Name: "smollm2-135m-instruct-q4_0", URL: origin + "/model.gguf", Size: env.size, SHA256: env.sum}}
-	}
-	cs, _ := json.Marshal(cases)
-	files := map[string][]byte{"index.html": []byte(enginePage), "engine.js": []byte(engineWorker), "wasm_exec.js": wasmExec,
-		"container-worker.js": browser.WorkerJS, "cases.json": cs}
+	files := map[string][]byte{"index.html": []byte(enginePage + reportPoster), "engine.js": []byte(engineWorker), "wasm_exec.js": wasmExec,
+		"container-worker.js": browser.WorkerJS}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(site, name), body, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	fs := http.FileServer(http.Dir(site))
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	port, reports := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 		w.Header().Set("Cross-Origin-Embedder-Policy", "require-corp")
 		fs.ServeHTTP(w, r)
-	})}
-	go srv.Serve(ln)
-	defer srv.Close()
-	pw, err := playwright.Run()
-	if err != nil {
+	}))
+	origin := fmt.Sprintf("http://localhost:%d", port)
+	for i := range cases {
+		cases[i].Models = []engineModel{{Name: llmRegistryName(), URL: origin + "/model.gguf", Size: env.size, SHA256: env.sum}}
+		if n := os.Getenv("LLM_REGISTRY_NAME"); n != "" && len(cases[i].Args) > 0 { // a model other than the default of the example
+			cases[i].Args = append([]string{cases[i].Args[0], "-model", "/models/" + n + ".gguf"}, cases[i].Args[1:]...)
+		}
+	}
+	cs, _ := json.Marshal(cases)
+	if err := os.WriteFile(filepath.Join(site, "cases.json"), cs, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	defer pw.Stop()
-	channel := os.Getenv("GPU_E2E_CHANNEL")
-	if channel == "" {
-		channel = "chromium"
-	}
-	opts := playwright.BrowserTypeLaunchOptions{Headless: playwright.Bool(true), Channel: playwright.String(channel)}
-	opts.Args = append(append(opts.Args, strings.Fields(os.Getenv("GPU_E2E_ARGS"))...), extraArgs...)
-	b, err := pw.Chromium.Launch(opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer b.Close()
-	p, err := b.NewPage()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var console []string
-	p.On("console", func(m playwright.ConsoleMessage) { console = append(console, m.Text()) })
-	if _, err := p.Goto(origin + "/index.html" + pageQuery(0, 0)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.WaitForFunction("() => window.__report !== undefined", nil, playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(1800000)}); err != nil {
-		t.Fatalf("%v\nconsole: %s", err, strings.Join(console, "\n"))
-	}
-	v, _ := p.Evaluate("window.__report")
+	// Chromium (Playwright), real Firefox or Safari, as in the batch lanes
+	// (GPU_E2E_BROWSER); the page posts its report to the server.
+	v, version := fetchReport(t, port, reports, pageQuery(0, 0), extraArgs, 30*time.Minute)
+	t.Logf("browser %s", version)
 	var rep engineReport
-	if err := json.Unmarshal([]byte(v.(string)), &rep); err != nil {
+	if err := json.Unmarshal([]byte(v), &rep); err != nil {
 		t.Fatal(err)
 	}
 	if rep.Error != "" {
-		t.Fatalf("engine worker: %s\nconsole: %s", rep.Error, strings.Join(console, "\n"))
+		t.Fatalf("engine worker: %s", rep.Error)
 	}
 	if len(rep.Results) != len(cases) {
 		t.Fatalf("%d results for %d cases", len(rep.Results), len(cases))
@@ -155,9 +167,6 @@ func runLLMCases(t *testing.T, env llmEnv, cases []engineCase, extraArgs []strin
 	t.Logf("gpu time budget: %s", rep.GPU)
 	if rep.GPU.Sanctions != 0 {
 		t.Errorf("%d GPU sanction(s) on legitimate LLM work", rep.GPU.Sanctions)
-	}
-	if len(console) > 0 {
-		t.Logf("browser console:\n%s", strings.Join(console, "\n"))
 	}
 	return rep
 }
@@ -175,7 +184,7 @@ type oracleRecord struct {
 }
 
 func loadOracle(t *testing.T, env llmEnv) []oracleRecord {
-	b, err := os.ReadFile(filepath.Join(env.repo, "testdata", "oracle-smollm2-135m-dequant-f32.json"))
+	b, err := os.ReadFile(filepath.Join(env.repo, "testdata", llmOracleFile()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,16 +233,16 @@ func TestLLMOracle(t *testing.T) {
 	oracle := loadOracle(t, env)
 	var cases []engineCase
 	for i, o := range oracle {
-		cases = append(cases, engineCase{Name: fmt.Sprintf("run%d", i), Module: "generate.wasm", GPU: true, GPUMemory: 512 << 20,
+		cases = append(cases, engineCase{Name: fmt.Sprintf("run%d", i), Module: "generate.wasm", GPU: true, GPUMemory: llmGPUMemory(),
 			Args: []string{"run", "-n", "32", o.Prompt}})
 	}
-	cases = append(cases, engineCase{Name: "check", Module: "generate.wasm", GPU: true, GPUMemory: 512 << 20,
+	cases = append(cases, engineCase{Name: "check", Module: "generate.wasm", GPU: true, GPUMemory: llmGPUMemory(),
 		Args: []string{"check", "-n", "16", oracle[0].Prompt}})
 	rep := runLLMCases(t, env, cases, launchFallbackArgs())
 	requireGPU(t, rep)
 	for i, o := range oracle {
 		r := rep.Results[i]
-		t.Logf("%s (%.0f ms): exit %d\n%s%s", r.Name, r.Ms, r.Exit, r.Stdout, r.Stderr)
+		t.Logf("%s (%.0f ms): exit %d\n%s%s events %q", r.Name, r.Ms, r.Exit, r.Stdout, r.Stderr, r.Events)
 		if r.Exit != 0 {
 			t.Errorf("%s: exit %d (%s)", r.Name, r.Exit, r.Error)
 			continue
@@ -282,7 +291,7 @@ func TestLLMOracle(t *testing.T) {
 // the CPU path's (a debugging aid; it fails only if the container fails).
 func TestLLMTrace(t *testing.T) {
 	env := needLLM(t)
-	rep := runLLMCases(t, env, []engineCase{{Name: "trace", Module: "generate.wasm", GPU: true, GPUMemory: 512 << 20,
+	rep := runLLMCases(t, env, []engineCase{{Name: "trace", Module: "generate.wasm", GPU: true, GPUMemory: llmGPUMemory(),
 		Args: []string{"trace", "The capital of France is"}}}, launchFallbackArgs())
 	r := rep.Results[0]
 	t.Logf("trace (%.0f ms): exit %d\n%s%s", r.Ms, r.Exit, r.Stdout, r.Stderr)
@@ -398,7 +407,7 @@ func TestLLMBench(t *testing.T) {
 	var gpuPre, gpuDec, cpuPre, cpuDec []float64
 	maxLoad := 0.0
 	for i := 0; i < rounds; i++ {
-		rep := runLLMCases(t, env, []engineCase{{Name: "bench", Module: "generate.wasm", GPU: true, GPUMemory: 512 << 20,
+		rep := runLLMCases(t, env, []engineCase{{Name: "bench", Module: "generate.wasm", GPU: true, GPUMemory: llmGPUMemory(),
 			Args: []string{"bench", "-rounds", "2", "-p", "128", "-n", "128", "-ctx", "512"}}}, launchFallbackArgs())
 		r := rep.Results[0]
 		if r.Exit != 0 {
@@ -445,7 +454,7 @@ func TestLLMDecodeBreakdown(t *testing.T) {
 	env := needLLM(t)
 	var cases []engineCase
 	for _, p := range []string{"8", "128"} {
-		cases = append(cases, engineCase{Name: "p" + p, Module: "generate.wasm", GPU: true, GPUMemory: 512 << 20,
+		cases = append(cases, engineCase{Name: "p" + p, Module: "generate.wasm", GPU: true, GPUMemory: llmGPUMemory(),
 			Args: []string{"bench", "-rounds", "2", "-p", p, "-n", "64", "-ctx", "512"}})
 	}
 	rep := runLLMCases(t, env, cases, launchFallbackArgs())

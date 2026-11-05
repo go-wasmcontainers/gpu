@@ -127,20 +127,37 @@ Nothing above bounds the first stall: a hostile shader that fits the quota can
 loop for seconds, the host sees it only when the budget expires, and the GPU
 runs the rest of it anyway. Layer 4 does not cancel; it makes the loop stop by
 itself. Every guest WGSL module with a compute entry point is rewritten before
-`createShaderModule` with go-gfx/wgsl `transform.LoopBudget` (v0.2.0, applied
-in `go-gfx/webgpu/batch`, `DeviceBackend.SetLoopBudget`): each outermost loop
+`createShaderModule` with go-gfx/wgsl `transform.LoopBudget` (v0.2.1, applied
+in `go-gfx/webgpu/batch`: `DeviceBackend.SetLoopBudget` for the batched stream,
+`batch.Guard` for the objects API): each outermost loop
 nest of each function activation counts its iterations and, past the budget,
 stores 1 into a host-owned flag and leaves the loop.
 
-- **Parse only.** The host calls `wgsl.Parse` and the transform, never
-  `Validate` (its checker still has false rejects). WGSL that does not parse
-  reaches the browser unchanged and the browser reports its own error: nothing
-  is refused by the host. Such a shader is bounded by layer 2 only. If the
-  browser refuses the rewritten text but accepts the original, the original is
-  kept and counted (`Stats.LoopFallbacks`, zero in every run below).
+- **Parse only, and nothing unbounded runs.** The host calls `wgsl.Parse` and
+  the transform, never `Validate` (its checker still has false rejects). A module
+  it cannot bound is **refused**, never passed through: WGSL its parser does not
+  accept, a loop in a module that has a `@vertex` or `@fragment` entry point (those
+  stages cannot take the storage flag: no loop is allowed there), or a rewrite
+  the browser refuses (a loop beside as many storage buffers as the device
+  allows leaves no room for the flag; a pipeline of a rewritten module needs an
+  explicit layout on the batched path). The answer is errno **15,
+  *unbounded*** (the context is lost, the grant is kept; `last_error` says which),
+  counted in `Stats.LoopRefused`. The browser's own verdict on the guest's text
+  comes first, so an invalid module is still reported as the browser reports
+  it (errno 11, the guest's own line and column).
+- **Every path to createShaderModule.** The batched stream (`gpubatch`), the
+  `wasi:webgpu` host module (`webgpu.Browser`: a refused module traps at
+  `create-shader-module`, the flag is read in the background and every wait
+  of the guest, `map-async` and `on-submitted-work-done`, first waits for it and
+  traps with the truncation) and the wasi-nn GPU kernels (`nnwebgpu.Backend`: a
+  cut kernel fails the run) all go through the same `batch.Guard`. One
+  e2e each: `TestLoopBudgetRefusals` (errnos 13 and 15),
+  `TestLoopBudgetWasiWebGPU` (a hostile `wasi:webgpu` container is cut, 167 ms),
+  `TestLoopBudgetWasiNN` (MNIST passes at the default work and fails at a work
+  of 1).
 - **Budget per dispatch.** `B = Work / invocations` of the dispatch (workgroup
   counts times 256), rounded down to a power of 4, at least 1024 and at most
-  2^24 (`Browser.LoopWork`, default 2^36, `LoopMin`). A big dispatch gets short
+  2^24 (`Browser.LoopWork`, default 2^36, `LoopMin`; `webgpu.Browser` and `nnwebgpu.Backend` too). A big dispatch gets short
   loops, a small one long loops; the cap exists because a one-workgroup
   dispatch would otherwise get billions of serial iterations (the first
   Firefox run of the hostile test found it). A `DispatchIndirect` is budgeted
@@ -165,10 +182,7 @@ stores 1 into a host-owned flag and leaves the loop.
   so a hostile shader fits under the budget and is cut by the 2 s cap (layer 2)
   instead; set `Browser.LoopWork` lower for such an adapter.
 - **Not covered.** Straight-line code (bounded already) and the dispatch size
-  (layer 3). A module that also has a `@vertex` entry is not rewritten (a
-  vertex stage cannot write storage). The older `wasi_webgpu` module (no
-  scheduler, no budget) and the host's own wasi-nn kernels do not go through
-  `gpubatch` and are not rewritten.
+  (layer 3). Rendering shaders with loops are refused, not bounded.
 
 **Choosing `Work` from measurement.** `internal/cmd/loopsweep`
 runs the LLM tests (`TestLLMOracle`, `TestLLMTrace`, `TestLLMShaders`:
@@ -182,14 +196,24 @@ backend) has zero truncations (the batchcompute shaders have no loops). The host
 quota allows (about 6.7 x 10^7 invocations, B = 1024) is cut after 26 to 37 ms
 in Chromium 151 and 100 ms in Firefox 159 (Apple M4 Max).
 
+**Real shaders, both models.** go-gfx/wgsl v0.3.0 keeps one counter per loop depth: a shared counter
+made an inner strided loop (a per-thread trip count) turn the outer loop's check non-uniform, and the browser
+refused the rewrite of 4 of the 19 Qwen2.5-0.5B modules (a `workgroupBarrier` in the outer loop). The 20
+kernels of go-wasmcontainers/llm (SmolLM2-135M and Qwen2.5-0.5B Q4_0) are now go-gfx/wgsl's real-shader
+corpus, and the host asks the device for one storage buffer more than the default (the flag) so that a
+shader that binds 8 can be rewritten. Chromium 151, both models: **SmolLM2 95 modules, 75 rewritten, 0 refused,
+0 truncations; Qwen2.5-0.5B 95 modules, 75 rewritten, 0 refused, 0 truncations.**
+
 **Cost.** Rewriting (parse, transform, print, in the browser's WebAssembly):
 **0.6 ms per module on average** (LLM: 50 modules, 30 ms in all, 35 of them
 rewritten; batch suite: 26 modules, 10 ms in Chromium, 13 to 15 ms in
 Firefox). Per dispatch, the counters and the extra `SetBindGroup`s cost LLM
 decode **about 10 % of its tokens per second** (Chromium 151, SmolLM2-135M Q4_0, 32
-tokens, interleaved off/on, 1-minute load 5 to 6: 248 tok/s without layer 4
-against 223 with, 12 samples each; an earlier 16-sample series gave 260 against
-229). Layer 4 can be turned off (`Browser.NoLoopBudget`, `?noloop=1` in the
+tokens, interleaved off/on, load at most 8). With the llm container v0.2.0 (200 to
+270 tok/s, 540 dispatches a token) that was 248 tok/s without layer 4 against
+223 with, 12 samples each. With llm v0.3.0, whose fused kernels make 5 submits
+and 156 dispatches a token, it is **558 tok/s without and 538 with (-3.6 %, 8
+samples each)**, above the 514 tok/s of llama.cpp on one core. Layer 4 can be turned off (`Browser.NoLoopBudget`, `?noloop=1` in the
 e2e page) for a measurement or a trusted workload; that is a trade, not a
 default.
 
@@ -272,20 +296,18 @@ sanctioned, and every batch test passes with zero truncations (the shader-error
 test now matches the error's position, `1:42` and `1:38`, because Safari's
 message does not name the token as Chromium's and Firefox's do).
 
-**Why Safari failed the hostile run in v0.10.0 (#32), located.** The control run
-(layer 4 off, budgets at 60 s, nobody sanctioned) is the one that cannot pass
-on Safari: the hostile's device is destroyed **by Safari itself** after 3.15 s
-of shader (`object destroyed`, the host did nothing; the host's `drains` stay at
-1), and the victim's submit, queued behind the hostile's work on the other
-device, **never completes**: it failed after 63.1 s, the host's 60 s budget, with
-`timeout` and the victim was sanctioned (event `gpu/sanction ... submit_ms=60006`).
-So the divergence is in what Safari does when its own watchdog trips: the
-other devices' pending `onSubmittedWorkDone` does not resolve. Chromium and
-Firefox finish the shader (4.5 s and 2.2 s). The host cannot cancel or repair
-that; it can only keep a shader from reaching Safari's watchdog, which layer 4
-does (cut at 65 ms, 50 times under 3.15 s). **Accepted, not fixed**: a shader the
-host does not rewrite (WGSL that does not parse, a module with a `@vertex`
-entry) or that fits under `LoopWork` on a slower GPU can still reach it, and
-then an innocent container queued behind it is sanctioned at the budget.
-`TestBatchSanction/control` is skipped on Safari for that reason; the Safari
-*before* figure is therefore the hang itself (63 s), not a latency.
+**Why Safari failed the hostile run in v0.10.0 (#32), located and handled.** The control run
+(layer 4 off, budgets at 60 s, nobody sanctioned) is the one Safari cannot finish: the hostile's device is
+destroyed **by Safari itself** after 3.15 s of shader (`object destroyed`; the host did nothing, its
+`drains` stay at 1), and the victim's submit, queued behind the hostile's work on the other device,
+**never completes**. Chromium and Firefox finish the shader (4.5 s and 2.2 s). What the host does about it
+now: it watches every device's loss (`Device.Lost`), and a submit that overruns its budget while a device
+was lost to the browser (not destroyed by the host) in the 10 s before its turn is **not an overrun**.
+The victim is not sanctioned and keeps its grant: its device is reset, its guest answers *context lost*
+(errno 7) and recreates its context, the engine emits `gpu/device-reset` (and `Stats.Resets` counts it).
+`TestBatchSanction/control` on Safari asserts exactly that: one device-reset, no sanction (it ran at
+the 60 s budget: the victim answered context-lost after 63 s). What the host cannot repair is Safari's
+state: after its watchdog it answered "no adapter" to every `requestAdapter` for more than 50 s, so the
+victim could not recreate its context inside that window. Layer 4 keeps shaders from reaching the
+watchdog (cut at 44 to 65 ms against 3.15 s), so the case now needs a shader the host does not bound
+(there is none left on the three paths) or a GPU slower than the default work assumes.

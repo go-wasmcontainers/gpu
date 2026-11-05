@@ -138,17 +138,21 @@ type Stats struct {
 	MaxInvocations uint64 `json:"maxInvocations"`
 	// MaxDispatchInvocations is the largest single dispatch, counted alike.
 	MaxDispatchInvocations uint64 `json:"maxDispatchInvocations"`
+	// Resets is how many submits did not complete because the browser
+	// destroyed another device (not an overrun: no sanction, the device is
+	// reset and the guest answered ContextLost).
+	Resets int64 `json:"resets"`
 	// Truncations is how many submits hit the loop budget (layer 4); each is
 	// also a sanction.
 	Truncations int64 `json:"truncations"`
 	// LoopModules is how many guest WGSL modules were parsed for layer 4,
-	// LoopRewritten how many of them were rewritten, LoopFallbacks how many
+	// LoopRewritten how many of them were rewritten, LoopRefused how many
 	// the browser refused after the rewrite (kept as written, bounded by the
 	// time budget only), and LoopSpent the time spent parsing, rewriting and
 	// printing them (the cost of layer 4 at module creation).
 	LoopModules   int64         `json:"loopModules"`
 	LoopRewritten int64         `json:"loopRewritten"`
-	LoopFallbacks int64         `json:"loopFallbacks"`
+	LoopRefused   int64         `json:"loopRefused"`
 	LoopSpent     time.Duration `json:"loopSpent"`
 	// Drains is how many times a destroyed device's work was waited out.
 	Drains int64 `json:"drains"`
