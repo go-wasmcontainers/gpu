@@ -88,13 +88,17 @@ type engineReport struct {
 const enginePage = `<!doctype html><meta charset=utf-8><title>engine e2e</title>
 <canvas id=c width=320 height=240></canvas><script>
 const w = new Worker("engine.js" + location.search);
-const g = document.getElementById("c").getContext("2d", {willReadFrequently: true});
+// The 2D context only on the first frame: compute-only runs never draw, and
+// an engine without canvas 2D (go-webengine) can still run them.
+let g2;
+const ctx2d = () => g2 || (g2 = document.getElementById("c").getContext("2d", {willReadFrequently: true}));
 window.__surfaces = {events: [], frames: []};
 w.onmessage = (e) => {
   const d = e.data;
   if (typeof d === "string") { window.__report = d; return; }
   if (d.t === "surface") { window.__surfaces.events.push({op: d.op, surface: d.surface, container: d.container, width: d.width, height: d.height}); return; }
   if (d.t === "frame") {
+    const g = ctx2d();
     g.drawImage(d.bitmap, 0, 0);
     const px = (x, y) => Array.from(g.getImageData(x, y, 1, 1).data);
     const all = g.getImageData(0, 0, d.width, d.height).data;

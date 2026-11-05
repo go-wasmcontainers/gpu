@@ -277,13 +277,16 @@ on SwiftShader (labelled fallback: proves the WGSL, not a GPU).
 | go-webengine engine v0.30.0 | pure Go, any platform | no WebGPU: since v0.30.0 Worker, SharedArrayBuffer and its views, Atomics, posting a SAB or a view, crossOriginIsolated (and its negative control: none without COOP/COEP), unsolicited worker messages, WebAssembly and `fetch` are green; OPFS, OffscreenCanvas and navigator.gpu are missing | **expected red** until go-webengine M4 (OPFS) and M5 (navigator.gpu); non-blocking CI job |
 
 The go-webengine lane (`GPU_E2E_BROWSER=webengine go test -tags e2e ./e2e/`)
-renders the test pages with `engine.New()`, `EnableDoneSignal`, raised wasm
+renders the test pages with `engine.New()`, `EnableDoneSignal`,
+`EnableWebGPU` (Metal, so macOS only), an OPFS root per run, raised wasm
 caps and `JSLog` captured (the driver is `e2e/webengine`, a module of its own
-pinned to engine v0.30.0, so this module's dependency graph does not grow).
+pinned to engine v0.34.0, so this module's dependency graph does not grow).
 It fails, never skips, and every failure names the missing capabilities
 ("no Worker", "no navigator.gpu", ...) from a probe page that reports each
 item separately (`TestBrowserCapabilities` runs the same probe on any
-browser); as go-webengine's milestones land, the items turn green.
+browser); OffscreenCanvas is listed but not required, no compute page uses
+it. On v0.34.0 every required capability is present, and the compute tests
+stop at `importScripts is not defined` in the workers.
 
 Per-submit round trip seen from the guest, 30 interleaved rounds each, Apple
 M4 Max, 1-minute load 4 to 5, medians (read 4 KiB / read 1 MiB /

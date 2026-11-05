@@ -198,14 +198,14 @@ jobs:
           cat "$RUNNER_TEMP/e2e.log"
           exit $status
 
-  # go-webengine (pure-Go engine of the go-webengine org, engine v0.30.0,
-  # pinned in e2e/webengine/go.mod, a module of its own). NON-BLOCKING and
-  # EXPECTED RED until go-webengine M3 (Workers, SAB/Atomics, COOP/COEP) and
-  # M5 (navigator.gpu): every test fails naming the missing capabilities, and
-  # the run's summary lists them.
+  # go-webengine (pure-Go engine of the go-webengine org, engine v0.34.0,
+  # pinned in e2e/webengine/go.mod, a module of its own). Its navigator.gpu
+  # (M5) is Metal, so the job runs on macOS. NON-BLOCKING and EXPECTED RED
+  # until its dedicated workers have importScripts: our workers load
+  # wasm_exec.js with it. A capability it lacks is named by every test.
   webgpu-webengine:
-    name: go-webengine e2e (expected red until M3+M5)
-    runs-on: ubuntu-latest
+    name: go-webengine e2e (expected red until importScripts)
+    runs-on: macos-latest
     continue-on-error: true
     timeout-minutes: 20
     steps:
