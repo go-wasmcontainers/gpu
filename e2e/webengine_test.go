@@ -124,6 +124,38 @@ const probePage = `<!doctype html><meta charset=utf-8><title>capabilities</title
 })();
 </script>`
 
+// noIsolationPage is served WITHOUT COOP/COEP: a page that is not
+// cross-origin isolated must not see SharedArrayBuffer, and crossOriginIsolated
+// must be false (HTML Standard, "cross-origin isolated capability"). Chromium is
+// the control; go-webengine must not hand out shared memory to a page that
+// did not ask for isolation.
+const noIsolationPage = `<!doctype html><meta charset=utf-8><title>no isolation</title><script>
+(() => {
+  const sab = typeof SharedArrayBuffer;
+  window.__report = JSON.stringify({caps: [
+    {name: "without COOP/COEP: SharedArrayBuffer is undefined", ok: sab === "undefined", detail: "typeof SharedArrayBuffer = " + sab},
+    {name: "without COOP/COEP: crossOriginIsolated is false", ok: self.crossOriginIsolated === false, detail: "crossOriginIsolated = " + self.crossOriginIsolated},
+  ]});
+})();
+</script>`
+
+// TestNoIsolationNegative: the negative control of the isolation cases.
+func TestNoIsolationNegative(t *testing.T) {
+	port, reports := serve(t, nopHandler{})
+	v, version := fetchPage(t, port, reports, "/__noiso.html", nil, 2*time.Minute)
+	var caps capReport
+	if err := json.Unmarshal([]byte(v), &caps); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%s", version)
+	for _, c := range caps.Caps {
+		t.Logf("case %-52s ok=%v %s", c.Name, c.OK, c.Detail)
+	}
+	if m := caps.missing(); len(m) > 0 {
+		t.Errorf("%s: %s", version, strings.Join(m, "; "))
+	}
+}
+
 type capReport struct {
 	Caps []struct {
 		Name   string `json:"name"`
@@ -153,7 +185,7 @@ type engineRun struct {
 }
 
 // renderInEngine runs e2e/webengine (its own module, pinned to
-// go-webengine/engine v0.28.1) on url.
+// go-webengine/engine v0.30.0) on url.
 func renderInEngine(t *testing.T, url string, timeout time.Duration) engineRun {
 	t.Helper()
 	cmd := exec.Command("go", "run", ".", "-url", url, "-timeout", timeout.String())
@@ -180,6 +212,14 @@ func runWebengine(t *testing.T, port int, reports <-chan string, url string, tim
 	t.Helper()
 	probeURL := fmt.Sprintf("http://localhost:%d/__probe.html", port)
 	probing := url == probeURL
+	if strings.Contains(url, "/__") && !probing {
+		// A page of the probe family (the negative control): rendered as is.
+		r := renderInEngine(t, url, 60*time.Second)
+		if r.Report == "" {
+			t.Fatalf("%s: the page did not report (error %q, console %q)", r.Version, r.Error, r.Log)
+		}
+		return r.Report, r.Version
+	}
 	pr := renderInEngine(t, probeURL, 60*time.Second)
 	if pr.Report == "" && pr.Error == "" && pr.Partial != "" {
 		// The engine ended the page before the probe's last items completed
@@ -207,7 +247,7 @@ func runWebengine(t *testing.T, port int, reports <-chan string, url string, tim
 		pr.Report = string(b)
 	}
 	if len(pr.Budget) > 0 && pr.Report != "" {
-		// The engine stopped work on a cap (go-webengine v0.28.1 logs it): a
+		// The engine stopped work on a cap (go-webengine v0.30.0 logs it): a
 		// named failure of its own.
 		var c capReport
 		if err := json.Unmarshal([]byte(pr.Report), &c); err != nil {

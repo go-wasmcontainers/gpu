@@ -37,8 +37,8 @@ github.com/go-simd/highway v0.0.14 h1:O3HPG00qgLGlrQyYBlMGyLYsuzZrqHA4+XNptPjV5g
 github.com/go-simd/highway v0.0.14/go.mod h1:t5XBPxqa10Lnj0frQS7Ur0JaN+/CckEmm5HXrqBDxXA=
 github.com/go-sourcemap/sourcemap v2.1.4+incompatible h1:a+iTbH5auLKxaNwQFg0B+TCYl6lbukKPc7b5x0n1s6Q=
 github.com/go-sourcemap/sourcemap v2.1.4+incompatible/go.mod h1:F8jJfvm2KbVjc5NqelyYJmf/v5J0dwNLS2mL4sNA1Jg=
-github.com/go-webengine/engine v0.28.1 h1:euOS6wI/r4f31bE6IMPlEBRtsG3XXgwlGlOtFLhbpHk=
-github.com/go-webengine/engine v0.28.1/go.mod h1:uaApvTBLq+cXfeX4WsbUzCKJRDmM12G/aTBE0sVaRxs=
+github.com/go-webengine/engine v0.30.0 h1:tL27Fbe5GHq4sikPFso1caeX9EoX1oLp8TWO6LzQjes=
+github.com/go-webengine/engine v0.30.0/go.mod h1:uaApvTBLq+cXfeX4WsbUzCKJRDmM12G/aTBE0sVaRxs=
 github.com/go-webengine/esbuildsandbox v0.1.0 h1:1LdmX+0/yJarQlxZgJ7JIMu+Qy6P7Yzu4NFcX9+jFl8=
 github.com/go-webengine/esbuildsandbox v0.1.0/go.mod h1:za8oj1vbDfVkTpHLeRk7JfEQjmJfj+GHNq4R47681vQ=
 github.com/go-widgets/painter v0.16.0 h1:j8FFObisySQChY2JiXS7Di2Mo4cqufIc0PDUnoDPMiA=

@@ -198,7 +198,7 @@ jobs:
           cat "$RUNNER_TEMP/e2e.log"
           exit $status
 
-  # go-webengine (pure-Go engine of the go-webengine org, engine v0.28.1,
+  # go-webengine (pure-Go engine of the go-webengine org, engine v0.30.0,
   # pinned in e2e/webengine/go.mod, a module of its own). NON-BLOCKING and
   # EXPECTED RED until go-webengine M3 (Workers, SAB/Atomics, COOP/COEP) and
   # M5 (navigator.gpu): every test fails naming the missing capabilities, and
