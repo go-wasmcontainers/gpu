@@ -80,6 +80,10 @@ func main() {
 	e.JSTimeout = *timeout
 	e.MaxWasmModuleBytes = 512 << 20
 	e.MaxWasmMemoryBytes = 2 << 30
+	// A fetch() response above the cap is refused (v0.40.1; 8 MiB by
+	// default): the test modules are ~10 MiB and the LLM lanes fetch GGUF
+	// models of 100-400 MB.
+	e.MaxResponseBytes = 1 << 30
 	e.JSLog = func(l string) {
 		mu.Lock()
 		defer mu.Unlock()

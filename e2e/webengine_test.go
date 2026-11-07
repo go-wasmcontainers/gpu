@@ -149,6 +149,9 @@ t("crypto.getRandomValues", () => { const a = new Uint8Array(8); crypto.getRando
 t("performance.now", () => typeof performance.now() === "number");
 t("TextEncoder/TextDecoder", () => new TextDecoder().decode(new TextEncoder().encode("é")) === "é");
 t("WebAssembly.instantiate, compile", () => typeof WebAssembly.instantiate === "function" && typeof WebAssembly.compile === "function");
+// wasm_exec.js checks instance instanceof WebAssembly.Instance (Go.run).
+t("WebAssembly.Instance, Module (instanceof)", () => typeof WebAssembly.Instance === "function" && typeof WebAssembly.Module === "function");
+t("performance.now advances", () => { const a = performance.now(); let x = 0; for (let i = 0; i < 2e6; i++) x += i; return performance.now() > a; });
 t("WebAssembly.instantiateStreaming", () => typeof WebAssembly.instantiateStreaming === "function");
 t("WebAssembly.Memory shared", () => new WebAssembly.Memory({initial: 1, maximum: 1, shared: true}).buffer instanceof SharedArrayBuffer);
 t("fetch, Response, Headers", () => typeof fetch === "function" && typeof Response === "function" && typeof Headers === "function");
