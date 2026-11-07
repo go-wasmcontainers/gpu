@@ -161,7 +161,23 @@ t("nested Worker", () => typeof Worker === "function");
 t("navigator.gpu", () => typeof navigator.gpu === "object" && navigator.gpu !== null);
 t("navigator.storage.getDirectory", () => typeof navigator.storage.getDirectory === "function");
 t("caches (Cache API)", () => typeof caches === "object" && caches !== null);
-postMessage(out);`
+t("AbortController, Headers.append", () => { const a = new AbortController(); const h = new Headers(); h.append("x-a", "1"); return typeof a.abort === "function" && a.signal !== undefined; });
+// What Go's net/http (src/net/http/roundtrip_js.go) does with a response.
+const at = async (name, f) => { try { out.push({name, ok: !!(await f()), detail: ""}); } catch (e) { out.push({name, ok: false, detail: String(e)}); } };
+(async () => {
+  await at("fetch response: headers.entries() iterator", async () => {
+    const r = await fetch("/__globals-worker.js");
+    const it = r.headers.entries(), n = it.next();
+    return typeof n.done === "boolean" && (n.done || (Array.isArray(n.value) && n.value.length === 2));
+  });
+  await at("fetch response: body.getReader() or arrayBuffer()", async () => {
+    const r = await fetch("/__globals-worker.js");
+    if (r.body === undefined || r.body === null) return (await r.arrayBuffer()).byteLength > 0;
+    const c = await r.body.getReader().read();
+    return c.value instanceof Uint8Array && c.value.byteLength > 0;
+  });
+  postMessage(out);
+})();`
 
 // noIsolationPage is served WITHOUT COOP/COEP: a page that is not
 // cross-origin isolated must not see SharedArrayBuffer, and crossOriginIsolated
