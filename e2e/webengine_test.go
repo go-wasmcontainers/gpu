@@ -176,6 +176,42 @@ const at = async (name, f) => { try { out.push({name, ok: !!(await f()), detail:
     const c = await r.body.getReader().read();
     return c.value instanceof Uint8Array && c.value.byteLength > 0;
   });
+  // What go-gfx/webgpu (gpu_js.go, device_js.go) needs, compute only.
+  let adapter, device;
+  // Independent items: one missing member must not hide the next.
+  await at("gpu: requestAdapter, adapter.limits, adapter.info", async () => {
+    adapter = await navigator.gpu.requestAdapter();
+    return typeof adapter.limits.maxStorageBufferBindingSize === "number" && typeof adapter.info === "object";
+  });
+  await at("gpu: adapter.features.values() (setlike)", async () => typeof adapter.features.values().next().done === "boolean");
+  await at("gpu: requestDevice, device.lost, error scopes, onSubmittedWorkDone", async () => {
+    device = await adapter.requestDevice();
+    device.pushErrorScope("validation");
+    const e = await device.popErrorScope();
+    return device.lost instanceof Promise && e === null && typeof device.queue.onSubmittedWorkDone === "function";
+  });
+  await at("gpu: device.features.values() (setlike)", async () => typeof device.features.values().next().done === "boolean");
+  await at("gpu: GPUShaderStage, GPUBufferUsage, GPUMapMode", async () => GPUShaderStage.COMPUTE === 4 && GPUBufferUsage.STORAGE === 0x80 && GPUMapMode.READ === 1);
+  await at("gpu: explicit bind group + pipeline layout, compute pipeline (async), mapAsync read-back", async () => {
+    // Numeric flags (COMPUTE 4, STORAGE 0x80, COPY_SRC 4, MAP_READ 1, COPY_DST 8,
+    // READ 1): the constants have their own item above.
+    const code = "@group(0) @binding(0) var<storage, read_write> x: array<u32>;\n@compute @workgroup_size(4) fn main(@builtin(global_invocation_id) i: vec3u) { x[i.x] = i.x * 3u; }";
+    const bgl = device.createBindGroupLayout({entries: [{binding: 0, visibility: 4, buffer: {type: "storage"}}]});
+    const pl = device.createPipelineLayout({bindGroupLayouts: [bgl]});
+    const p = await device.createComputePipelineAsync({layout: pl, compute: {module: device.createShaderModule({code}), entryPoint: "main"}});
+    const buf = device.createBuffer({size: 16, usage: 0x80 | 4});
+    const rd = device.createBuffer({size: 16, usage: 1 | 8});
+    const enc = device.createCommandEncoder(), pass = enc.beginComputePass();
+    pass.setPipeline(p); pass.setBindGroup(0, device.createBindGroup({layout: bgl, entries: [{binding: 0, resource: {buffer: buf}}]}));
+    pass.dispatchWorkgroups(1); pass.end();
+    enc.copyBufferToBuffer(buf, 0, rd, 0, 16);
+    device.queue.submit([enc.finish()]);
+    await rd.mapAsync(1);
+    const v = Array.from(new Uint32Array(rd.getMappedRange()));
+    rd.unmap();
+    if (v.join() !== "0,3,6,9") throw new Error("read back " + v.join());
+    return true;
+  });
   postMessage(out);
 })();`
 

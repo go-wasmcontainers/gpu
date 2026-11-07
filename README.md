@@ -280,7 +280,7 @@ The go-webengine lane (`GPU_E2E_BROWSER=webengine go test -tags e2e ./e2e/`)
 renders the test pages with `engine.New()`, `EnableDoneSignal`,
 `EnableWebGPU` (Metal, so macOS only), an OPFS root per run, raised wasm
 caps, a 1 GiB fetch response cap (GGUF models) and `JSLog` captured (the
-driver is `e2e/webengine`, a module of its own pinned to engine v0.40.2, so
+driver is `e2e/webengine`, a module of its own pinned to engine v0.41.0, so
 this module's dependency graph does not grow).
 It fails, never skips, and every failure names the missing capabilities
 ("no Worker", "no navigator.gpu", ...) from a probe page that reports each
@@ -289,9 +289,11 @@ browser), including, inside a dedicated worker, every global the compute
 workers use; OffscreenCanvas and a worker's Cache API are listed but not
 required. The test workers log their milestones (fetched, instantiated,
 failed with the stack) to the page's console, so a run that stops says
-where. On v0.40.2 Go starts in the workers and stops at its first HTTP
-request: the workers lack `AbortController` and `Headers.entries()`, which
-Go's js/wasm `net/http` transport uses for every fetch.
+where. The worker probe also runs what go-gfx/webgpu needs for compute: a
+storage-buffer dispatch with an explicit pipeline layout, read back with
+`mapAsync`. On v0.41.0 the workers lack, in WebGPU, `features.values()`,
+error scopes, the `GPUShaderStage`/`GPUBufferUsage`/`GPUMapMode` constants
+and explicit layouts.
 
 Per-submit round trip seen from the guest, 30 interleaved rounds each, Apple
 M4 Max, 1-minute load 4 to 5, medians (read 4 KiB / read 1 MiB /
