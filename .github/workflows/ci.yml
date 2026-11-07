@@ -198,12 +198,12 @@ jobs:
           cat "$RUNNER_TEMP/e2e.log"
           exit $status
 
-  # go-webengine (pure-Go engine of the go-webengine org, engine v0.36.0,
+  # go-webengine (pure-Go engine of the go-webengine org, engine v0.38.0,
   # pinned in e2e/webengine/go.mod, a module of its own). Its navigator.gpu
   # (M5) is Metal, so the job runs on macOS. NON-BLOCKING and EXPECTED RED
   # until its dedicated workers have every global the compute workers use
-  # (WebAssembly, fetch, location, nested Worker are still missing): the
-  # probe names each one, inside a worker, in every test's failure.
+  # (shared WebAssembly.Memory is still missing): the probe names each one,
+  # inside a worker, in every test's failure.
   webgpu-webengine:
     name: go-webengine e2e (expected red until its worker globals)
     runs-on: macos-latest

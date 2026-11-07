@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -41,12 +42,26 @@ const (
 	partialPrefix = "__PARTIAL__" // the probe's results so far, logged after each item
 )
 
+// engineVersion is the engine module version this driver was built with,
+// read from the build info so a go.mod bump cannot leave a stale label.
+func engineVersion() string {
+	const path = "github.com/go-webengine/engine"
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, d := range bi.Deps {
+			if d.Path == path {
+				return "go-webengine/engine " + d.Version
+			}
+		}
+	}
+	return "go-webengine/engine (unknown version)"
+}
+
 func main() {
 	url := flag.String("url", "", "page to render")
 	timeout := flag.Duration("timeout", 60*time.Second, "script budget (JSTimeout)")
 	flag.Parse()
 	var res result
-	res.Version = "go-webengine/engine v0.36.0"
+	res.Version = engineVersion()
 	var mu sync.Mutex
 	e := engine.New()
 	e.EnableDoneSignal = true
