@@ -122,9 +122,43 @@ const probePage = `<!doctype html><meta charset=utf-8><title>capabilities</title
     const why = await stream(n);
     add(name, why === "", why);
   }
+  // What the compute workers use, checked INSIDE a dedicated worker, every
+  // item at once (wasm_exec.js, go-wasmcontainers/engine, go-gfx/webgpu).
+  const inWorker = await new Promise((resolve) => {
+    if (typeof Worker !== "function") return resolve(null);
+    let w;
+    const timer = setTimeout(() => { try { w.terminate(); } catch (e) {} resolve(null); }, 15000);
+    try {
+      w = new Worker("/__globals-worker.js");
+      w.onmessage = (e) => { clearTimeout(timer); try { w.terminate(); } catch (x) {} resolve(e.data); };
+      w.onerror = (e) => { clearTimeout(timer); resolve(null); };
+    } catch (e) { clearTimeout(timer); resolve(null); }
+  });
+  if (inWorker === null) add("worker: the globals worker reported", false, "no report in 15 s");
+  else for (const c of inWorker) add("worker: " + c.name, c.ok, c.detail);
   window.__report = JSON.stringify({caps});
 })();
 </script>`
+
+// globalsWorker is /__globals-worker.js: it posts one {name, ok, detail} per
+// global the compute workers need, so a missing one never hides the next.
+const globalsWorker = `const out = [];
+const t = (name, f) => { try { out.push({name, ok: !!f(), detail: ""}); } catch (e) { out.push({name, ok: false, detail: String(e)}); } };
+t("importScripts", () => typeof importScripts === "function");
+t("crypto.getRandomValues", () => { const a = new Uint8Array(8); crypto.getRandomValues(a); return true; });
+t("performance.now", () => typeof performance.now() === "number");
+t("TextEncoder/TextDecoder", () => new TextDecoder().decode(new TextEncoder().encode("é")) === "é");
+t("WebAssembly.instantiate, compile", () => typeof WebAssembly.instantiate === "function" && typeof WebAssembly.compile === "function");
+t("WebAssembly.instantiateStreaming", () => typeof WebAssembly.instantiateStreaming === "function");
+t("WebAssembly.Memory shared", () => new WebAssembly.Memory({initial: 1, maximum: 1, shared: true}).buffer instanceof SharedArrayBuffer);
+t("fetch, Response, Headers", () => typeof fetch === "function" && typeof Response === "function" && typeof Headers === "function");
+t("URLSearchParams, location.search", () => typeof URLSearchParams === "function" && typeof location.search === "string");
+t("SharedArrayBuffer, Atomics.wait", () => typeof SharedArrayBuffer === "function" && typeof Atomics.wait === "function");
+t("nested Worker", () => typeof Worker === "function");
+t("navigator.gpu", () => typeof navigator.gpu === "object" && navigator.gpu !== null);
+t("navigator.storage.getDirectory", () => typeof navigator.storage.getDirectory === "function");
+t("caches (Cache API)", () => typeof caches === "object" && caches !== null);
+postMessage(out);`
 
 // noIsolationPage is served WITHOUT COOP/COEP: a page that is not
 // cross-origin isolated must not see SharedArrayBuffer, and crossOriginIsolated
@@ -168,8 +202,9 @@ type capReport struct {
 
 // informational capabilities are listed by the probe but required by no e2e
 // page and by no part of go-wasmcontainers/engine: OffscreenCanvas is for
-// drawing, and these lanes only compute.
-var informational = map[string]bool{"OffscreenCanvas": true}
+// drawing, and these lanes only compute; without the Cache API the engine
+// compiles from the bytes (runtime/browser/codecache_js.go).
+var informational = map[string]bool{"OffscreenCanvas": true, "worker: caches (Cache API)": true}
 
 func (c capReport) missing() []string {
 	var m []string

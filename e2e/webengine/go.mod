@@ -2,7 +2,7 @@ module github.com/go-wasmcontainers/gpu/e2e/webengine
 
 go 1.27.3
 
-require github.com/go-webengine/engine v0.34.0
+require github.com/go-webengine/engine v0.36.0
 
 require (
 	github.com/andybalholm/brotli v1.2.7 // indirect
@@ -30,7 +30,7 @@ require (
 	github.com/go-webengine/esbuildsandbox v0.1.0 // indirect
 	github.com/go-widgets/painter v0.16.0 // indirect
 	github.com/google/pprof v0.0.0-20240727154555-813a5fbdbec8 // indirect
-	github.com/klauspost/compress v1.18.7 // indirect
+	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/refraction-networking/utls v1.8.2 // indirect
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef // indirect
 	github.com/tannevaled/gobig2 v0.2.0 // indirect

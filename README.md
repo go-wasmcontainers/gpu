@@ -280,13 +280,14 @@ The go-webengine lane (`GPU_E2E_BROWSER=webengine go test -tags e2e ./e2e/`)
 renders the test pages with `engine.New()`, `EnableDoneSignal`,
 `EnableWebGPU` (Metal, so macOS only), an OPFS root per run, raised wasm
 caps and `JSLog` captured (the driver is `e2e/webengine`, a module of its own
-pinned to engine v0.34.0, so this module's dependency graph does not grow).
+pinned to engine v0.36.0, so this module's dependency graph does not grow).
 It fails, never skips, and every failure names the missing capabilities
 ("no Worker", "no navigator.gpu", ...) from a probe page that reports each
 item separately (`TestBrowserCapabilities` runs the same probe on any
-browser); OffscreenCanvas is listed but not required, no compute page uses
-it. On v0.34.0 every required capability is present, and the compute tests
-stop at `importScripts is not defined` in the workers.
+browser), including, inside a dedicated worker, every global the compute
+workers use; OffscreenCanvas and a worker's Cache API are listed but not
+required. On v0.36.0 the page has every required capability; its workers
+still lack WebAssembly, fetch, location and nested Workers.
 
 Per-submit round trip seen from the guest, 30 interleaved rounds each, Apple
 M4 Max, 1-minute load 4 to 5, medians (read 4 KiB / read 1 MiB /

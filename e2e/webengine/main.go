@@ -46,7 +46,7 @@ func main() {
 	timeout := flag.Duration("timeout", 60*time.Second, "script budget (JSTimeout)")
 	flag.Parse()
 	var res result
-	res.Version = "go-webengine/engine v0.34.0"
+	res.Version = "go-webengine/engine v0.36.0"
 	var mu sync.Mutex
 	e := engine.New()
 	e.EnableDoneSignal = true
