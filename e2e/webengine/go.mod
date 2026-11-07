@@ -2,7 +2,7 @@ module github.com/go-wasmcontainers/gpu/e2e/webengine
 
 go 1.27.3
 
-require github.com/go-webengine/engine v0.30.0
+require github.com/go-webengine/engine v0.34.0
 
 require (
 	github.com/andybalholm/brotli v1.2.7 // indirect
@@ -10,15 +10,19 @@ require (
 	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
 	github.com/dop251/goja v0.0.0-20260926152631-39ec2650adc9 // indirect
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
+	github.com/ebitengine/purego v0.11.3 // indirect
 	github.com/evanw/esbuild v0.28.2 // indirect
 	github.com/go-browserhttp/browserhttp v0.2.0 // indirect
 	github.com/go-gfx/gfx v0.37.0 // indirect
 	github.com/go-gfx/oksvg v0.3.1 // indirect
+	github.com/go-gfx/wgsl v0.4.0 // indirect
 	github.com/go-images/gif v0.2.0 // indirect
 	github.com/go-images/images v0.1.1-0.20261026203936-4ac989d310a1 // indirect
 	github.com/go-images/jpeg v0.3.0 // indirect
 	github.com/go-images/jpeg2000 v0.14.0 // indirect
 	github.com/go-images/png v0.2.0 // indirect
+	github.com/go-macos/metal v0.4.0 // indirect
+	github.com/go-macos/objc v0.11.2 // indirect
 	github.com/go-opentype/fonts v0.14.0 // indirect
 	github.com/go-opentype/opentype v0.16.2-0.20261027113239-5e69589e9a5e // indirect
 	github.com/go-simd/highway v0.0.14 // indirect
