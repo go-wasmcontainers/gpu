@@ -96,6 +96,8 @@ window.__surfaces = {events: [], frames: []};
 w.onmessage = (e) => {
   const d = e.data;
   if (typeof d === "string") { window.__report = d; return; }
+  if (d && d.log) { console.log("engine worker: " + d.log); return; }
+  if (d && d.fail) { if (window.__report === undefined) window.__report = JSON.stringify({error: d.fail}); return; }
   if (d.t === "surface") { window.__surfaces.events.push({op: d.op, surface: d.surface, container: d.container, width: d.width, height: d.height}); return; }
   if (d.t === "frame") {
     const g = ctx2d();
@@ -145,7 +147,14 @@ type surfaceLog struct {
 
 const engineWorker = `importScripts("wasm_exec.js");
 const go = new Go();
-WebAssembly.instantiateStreaming(fetch("enginetest.wasm"), go.importObject).then((r) => go.run(r.instance));`
+// Milestones to the page's console, and a failure posted as {fail}: the page
+// takes it as the report only if the engine's own report has not arrived.
+const t0 = performance.now(), ms = () => Math.round(performance.now() - t0) + " ms";
+const say = (s) => postMessage({log: s});
+say("fetching enginetest.wasm");
+WebAssembly.instantiateStreaming(fetch("enginetest.wasm"), go.importObject)
+  .then((r) => { say("instantiated after " + ms() + ", running"); return go.run(r.instance); })
+  .catch((e) => { say("failed after " + ms() + ": " + e + "\n" + (e && e.stack)); postMessage({fail: "engine worker: " + e}); });`
 
 func build(t *testing.T, root, out, pkg, goos string) {
 	t.Helper()

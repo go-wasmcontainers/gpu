@@ -48,12 +48,17 @@ type report struct {
 
 const page = `<!doctype html><meta charset=utf-8><title>webgpu e2e</title><script>
 const w = new Worker("worker.js" + location.search);
-w.onmessage = (e) => { if (typeof e.data === "string") window.__report = e.data; };
+w.onmessage = (e) => {
+  if (typeof e.data === "string") window.__report = e.data;
+  else if (e.data && e.data.fail && window.__report === undefined) window.__report = JSON.stringify({error: e.data.fail + "\n" + (window.__log || []).join("\n")});
+};
 // A worker error must not replace a report that already arrived: a device's lost
 // promise can resolve after the Go program exited (Firefox), which throws "Go
 // program has already exited" late.
 w.onerror = (e) => { if (window.__report === undefined) window.__report = JSON.stringify({error: "worker: " + e.message + "\n" + (window.__log || []).join("\n")}); };
-w.addEventListener("message", (e) => { if (e.data && e.data.log) (window.__log = window.__log || []).push(e.data.log); });
+// The worker's lines also go to this page's console: an engine that captures
+// the console (go-webengine's JSLog) then shows how far a silent run got.
+w.addEventListener("message", (e) => { if (e.data && e.data.log) { (window.__log = window.__log || []).push(e.data.log); console.log("worker: " + e.data.log); } });
 </script>`
 
 const worker = `importScripts("wasm_exec.js");
@@ -61,7 +66,14 @@ const worker = `importScripts("wasm_exec.js");
 const oldLog = console.log;
 console.log = (...a) => { postMessage({log: a.join(" ")}); oldLog(...a); };
 const go = new Go();
-WebAssembly.instantiateStreaming(fetch("webtest.wasm"), go.importObject).then((r) => go.run(r.instance));`
+// Milestones, and a failed fetch or compile reported instead of swallowed.
+// A failure is posted as {fail}: the page takes it as the report only if the
+// program's own report has not arrived (a late rejection must not replace it).
+const t0 = performance.now(), ms = () => Math.round(performance.now() - t0) + " ms";
+console.log("fetching webtest.wasm");
+WebAssembly.instantiateStreaming(fetch("webtest.wasm"), go.importObject)
+  .then((r) => { console.log("instantiated after " + ms() + ", running"); return go.run(r.instance); })
+  .catch((e) => { console.log("failed after " + ms() + ": " + e + "\n" + (e && e.stack)); postMessage({fail: "worker: " + e}); });`
 
 // cases lists the vendored node tests and MNIST-12, served under /data.
 func cases(t *testing.T, root string) []caseSpec {
