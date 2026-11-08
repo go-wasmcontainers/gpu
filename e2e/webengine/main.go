@@ -84,9 +84,26 @@ func main() {
 	// default): the test modules are ~10 MiB and the LLM lanes fetch GGUF
 	// models of 100-400 MB.
 	e.MaxResponseBytes = 1 << 30
+	// TestWebGPUBackend fetches 123 models and their inputs and outputs in one
+	// page: several hundred requests (v0.43.0; 100 by default).
+	e.MaxRequests = 2000
+	// The render stops, silently, once the Go heap grows this much past its
+	// start (768 MiB by default). Since v0.43.4 the engine interprets wasm,
+	// and the container test (an engine in wasm running wasip1 guests) needs
+	// more than the default.
+	e.MaxJSHeapBytes = 4 << 30
+	// -trace copies each console line to stderr as it comes: a native crash
+	// kills the process before the JSON result, and the last lines show
+	// which call the page was in.
+	trace := os.Getenv("GPU_E2E_WEBENGINE_TRACE") != ""
+	t0 := time.Now()
+	since := func() string { return time.Since(t0).Round(time.Millisecond).String() }
 	e.JSLog = func(l string) {
 		mu.Lock()
 		defer mu.Unlock()
+		if trace {
+			fmt.Fprintln(os.Stderr, "console", since()+":", l)
+		}
 		if strings.Contains(l, "cap reached") { // v0.30.0: maxScripts / maxTimerJobs stopped work
 			res.Budget = append(res.Budget, l)
 		}
@@ -102,10 +119,20 @@ func main() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout+30*time.Second)
 	defer cancel()
+	if trace {
+		dl, _ := ctx.Deadline()
+		fmt.Fprintf(os.Stderr, "trace: JSTimeout %v, context deadline in %v\n", e.JSTimeout, time.Until(dl).Round(time.Second))
+	}
 	doc, err := e.Fetch(ctx, *url)
+	if trace {
+		fmt.Fprintf(os.Stderr, "trace %s: Fetch returned, err %v, ctx.Err %v\n", since(), err, ctx.Err())
+	}
 	if err == nil {
 		res.Title = doc.Title
 		_, _, err = e.RenderDocument(ctx, doc, image.Rect(0, 0, 800, 600))
+		if trace {
+			fmt.Fprintf(os.Stderr, "trace %s: RenderDocument returned, err %v, ctx.Err %v\n", since(), err, ctx.Err())
+		}
 	}
 	if err != nil {
 		res.Error = err.Error()

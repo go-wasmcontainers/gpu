@@ -2,7 +2,7 @@ module github.com/go-wasmcontainers/gpu/e2e/webengine
 
 go 1.27.3
 
-require github.com/go-webengine/engine v0.41.0
+require github.com/go-webengine/engine v0.44.0
 
 require (
 	github.com/andybalholm/brotli v1.2.7 // indirect
@@ -21,8 +21,8 @@ require (
 	github.com/go-images/jpeg v0.3.0 // indirect
 	github.com/go-images/jpeg2000 v0.14.0 // indirect
 	github.com/go-images/png v0.2.0 // indirect
-	github.com/go-macos/metal v0.4.0 // indirect
-	github.com/go-macos/objc v0.11.2 // indirect
+	github.com/go-macos/metal v0.6.1 // indirect
+	github.com/go-macos/objc v0.12.0 // indirect
 	github.com/go-opentype/fonts v0.14.0 // indirect
 	github.com/go-opentype/opentype v0.16.2-0.20261027113239-5e69589e9a5e // indirect
 	github.com/go-simd/highway v0.0.14 // indirect
