@@ -134,11 +134,78 @@ const probePage = `<!doctype html><meta charset=utf-8><title>capabilities</title
       w.onerror = (e) => { clearTimeout(timer); resolve(null); };
     } catch (e) { clearTimeout(timer); resolve(null); }
   });
+  // A worker's exported shared memory, posted to this page, then grown by
+  // the guest's memory.grow: size, the guest's write, this page's write back
+  // (the engine worker's view of a guest that grows after posting).
+  const memWhy = await new Promise((resolve) => {
+    if (typeof Worker !== "function") return resolve("no Worker");
+    let w, m;
+    const timer = setTimeout(() => { try { w.terminate(); } catch (e) {} resolve("no answer in 15 s"); }, 15000);
+    const done = (why) => { clearTimeout(timer); try { w.terminate(); } catch (e) {} resolve(why); };
+    try {
+      w = new Worker("/__memory-worker.js");
+      w.onmessage = (e) => {
+        const d = e.data;
+        if (d.t === "error") return done("worker: " + d.message);
+        if (d.t === "readback") return done(d.v === 9 ? "" : "this page wrote 9 at 70001, the worker reads " + d.v);
+        if (d.t === "memory") {
+          m = d.memory;
+          if (!(m instanceof WebAssembly.Memory)) return done("the posted memory is not a WebAssembly.Memory");
+          if (!(m.buffer instanceof SharedArrayBuffer)) return done("its buffer is not a SharedArrayBuffer");
+          return;
+        }
+        if (d.t === "after-memory") {
+          if (m === undefined) return done("a message posted right after the Memory arrived before it");
+          return w.postMessage("grow");
+        }
+        // "grown": read through the Memory posted before the grow.
+        if (m.buffer.byteLength !== 131072) return done("byteLength " + m.buffer.byteLength + " here after the guest's memory.grow (the worker never re-read its buffer), 131072 (2 pages) in the guest");
+        new Uint8Array(m.buffer)[70001] = 9;
+        w.postMessage("check");
+      };
+      w.onerror = (e) => done("worker error: " + (e && e.message));
+    } catch (e) { done("new Worker failed: " + e); }
+  });
+  add("worker's exported shared memory, posted here, then grown by memory.grow: size and writes both ways", memWhy === "", memWhy);
   if (inWorker === null) add("worker: the globals worker reported", false, "no report in 15 s");
   else for (const c of inWorker) add("worker: " + c.name, c.ok, c.detail);
   window.__report = JSON.stringify({caps});
 })();
 </script>`
+
+// memoryWorker is /__memory-worker.js: go-wasmcontainers/engine's container
+// path, in its order. It instantiates a module whose exported memory is
+// shared (1 page, maximum 2) and posts the Memory to its creator FIRST, as
+// worker.js does before _start; on "grow" the guest grows it with the
+// memory.grow INSTRUCTION (export g, as a Go runtime does, not the JS grow()
+// method) and says "grown" without touching mem.buffer itself; the creator,
+// holding the Memory it was posted earlier, must see 2 pages and writes byte
+// 70001 (in the new page), which this worker then reads. Assembled by hand: type
+// () -> i32, func g = (i32.const 1) memory.grow, memory, exports.
+const memoryWorker = `const bytes = new Uint8Array([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0,
+  1, 5, 1, 0x60, 0, 1, 0x7f,
+  3, 2, 1, 0,
+  5, 4, 1, 3, 1, 2,
+  7, 0x0e, 2, 6, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 2, 0, 1, 0x67, 0, 0,
+  0x0a, 8, 1, 6, 0, 0x41, 1, 0x40, 0, 0x0b]);
+let mem, inst;
+onmessage = (e) => {
+  if (e.data === "grow") {
+    // No mem.buffer read here after the grow: a container's worker is
+    // blocked in Atomics.wait while its creator reads the guest's memory.
+    if (inst.exports.g() !== 1) return postMessage({t: "error", message: "memory.grow did not return the old size 1"});
+    return postMessage({t: "grown"});
+  }
+  postMessage({t: "readback", v: new Uint8Array(mem.buffer)[70001]});
+};
+WebAssembly.instantiate(bytes, {}).then(({instance}) => {
+  inst = instance;
+  mem = instance.exports.memory;
+  // Back to back, as worker.js posts the memory then its first call: the
+  // second must not overtake the first.
+  postMessage({t: "memory", memory: mem});
+  postMessage({t: "after-memory"});
+}).catch((e) => postMessage({t: "error", message: String(e)}));`
 
 // globalsWorker is /__globals-worker.js: it posts one {name, ok, detail} per
 // global the compute workers need, so a missing one never hides the next.
@@ -154,6 +221,9 @@ t("WebAssembly.Instance, Module (instanceof)", () => typeof WebAssembly.Instance
 t("performance.now advances", () => { const a = performance.now(); let x = 0; for (let i = 0; i < 2e6; i++) x += i; return performance.now() > a; });
 t("WebAssembly.instantiateStreaming", () => typeof WebAssembly.instantiateStreaming === "function");
 t("WebAssembly.Memory shared", () => new WebAssembly.Memory({initial: 1, maximum: 1, shared: true}).buffer instanceof SharedArrayBuffer);
+// go-wasmcontainers/engine's worker.js refuses a guest whose exported memory
+// fails this test.
+t("WebAssembly.Memory instanceof", () => new WebAssembly.Memory({initial: 1, maximum: 1, shared: true}) instanceof WebAssembly.Memory);
 t("fetch, Response, Headers", () => typeof fetch === "function" && typeof Response === "function" && typeof Headers === "function");
 t("URLSearchParams, location.search", () => typeof URLSearchParams === "function" && typeof location.search === "string");
 t("SharedArrayBuffer, Atomics.wait", () => typeof SharedArrayBuffer === "function" && typeof Atomics.wait === "function");
@@ -161,6 +231,14 @@ t("nested Worker", () => typeof Worker === "function");
 t("navigator.gpu", () => typeof navigator.gpu === "object" && navigator.gpu !== null);
 t("navigator.storage.getDirectory", () => typeof navigator.storage.getDirectory === "function");
 t("caches (Cache API)", () => typeof caches === "object" && caches !== null);
+// go-gfx/webgpu's InstallReplay (record_js.go) loads its replay script so:
+// a Blob, an object URL, importScripts of that blob: URL.
+t("Blob, URL.createObjectURL, importScripts(blob:)", () => {
+  const u = URL.createObjectURL(new Blob(["self.__blobScriptRan = 42;"], {type: "text/javascript"}));
+  importScripts(u);
+  URL.revokeObjectURL(u);
+  return self.__blobScriptRan === 42;
+});
 t("AbortController, Headers.append", () => { const a = new AbortController(); const h = new Headers(); h.append("x-a", "1"); return typeof a.abort === "function" && a.signal !== undefined; });
 // What Go's net/http (src/net/http/roundtrip_js.go) does with a response.
 const at = async (name, f) => { try { out.push({name, ok: !!(await f()), detail: ""}); } catch (e) { out.push({name, ok: false, detail: String(e)}); } };
@@ -175,6 +253,25 @@ const at = async (name, f) => { try { out.push({name, ok: !!(await f()), detail:
     if (r.body === undefined || r.body === null) return (await r.arrayBuffer()).byteLength > 0;
     const c = await r.body.getReader().read();
     return c.value instanceof Uint8Array && c.value.byteLength > 0;
+  });
+  // i64 crosses the JS boundary as BigInt (JS-BigInt integration): every
+  // WASI call with a 64-bit argument (clock_time_get's precision, fd_seek's
+  // offset) goes through it in go-wasmcontainers/engine's worker.js. The
+  // module, assembled by hand: import env.take(i64), export give() -> i64
+  // returning 42 and pass() calling take(42).
+  await at("WebAssembly i64 <-> BigInt (import argument and export result)", async () => {
+    const bytes = new Uint8Array([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0,
+      1, 0x0c, 3, 0x60, 1, 0x7e, 0, 0x60, 0, 1, 0x7e, 0x60, 0, 0,
+      2, 0x0c, 1, 3, 0x65, 0x6e, 0x76, 4, 0x74, 0x61, 0x6b, 0x65, 0, 0,
+      3, 3, 2, 1, 2,
+      7, 0x0f, 2, 4, 0x67, 0x69, 0x76, 0x65, 0, 1, 4, 0x70, 0x61, 0x73, 0x73, 0, 2,
+      0x0a, 0x0d, 2, 4, 0, 0x42, 0x2a, 0x0b, 6, 0, 0x42, 0x2a, 0x10, 0, 0x0b]);
+    let got;
+    const {instance} = await WebAssembly.instantiate(bytes, {env: {take: (v) => { got = v; }}});
+    instance.exports.pass();
+    const r = instance.exports.give();
+    if (typeof got !== "bigint" || typeof r !== "bigint") throw new Error("import got " + typeof got + " " + got + ", export returned " + typeof r + " " + r);
+    return got === 42n && r === 42n;
   });
   // What go-gfx/webgpu (gpu_js.go, device_js.go) needs, compute only.
   let adapter, device;

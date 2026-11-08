@@ -282,7 +282,7 @@ renders the test pages with `engine.New()`, `EnableDoneSignal`,
 caps, a 1 GiB fetch response cap (GGUF models), 2000 requests per page, a
 4 GiB heap ceiling (the engine interprets wasm since v0.43.4 and stops a
 render past the ceiling) and `JSLog` captured (the driver is
-`e2e/webengine`, a module of its own pinned to engine v0.44.0, so this
+`e2e/webengine`, a module of its own pinned to engine v0.44.5, so this
 module's dependency graph does not grow).
 It fails, never skips, and every failure names the missing capabilities
 ("no Worker", "no navigator.gpu", ...) from a probe page that reports each
@@ -293,10 +293,12 @@ required. The test workers log their milestones (fetched, instantiated,
 failed with the stack) to the page's console, so a run that stops says
 where. The worker probe also runs what go-gfx/webgpu needs for compute: a
 storage-buffer dispatch with an explicit pipeline layout, read back with
-`mapAsync`. On v0.44.0 the probe passes; the ONNX cases stop at
-`createBindGroup` on a buffer sub-range (not supported yet), and the
-container test hangs until its deadline while the engine worker serves its
-container workers.
+`mapAsync`; and the container path: i64 arguments as BigInt, and a
+worker's exported shared memory posted to its creator, then grown by the
+guest's `memory.grow`, seen grown there. On v0.44.5 the containers run end
+to end (the no-GPU case passes); the GPU cases stop at go-gfx/webgpu's
+replay script, which a worker loads from a `Blob` that go-webengine lacks,
+and the ONNX cases at `createBindGroup` on a buffer sub-range.
 
 Debugging the lane: `GPU_E2E_WEBENGINE_TRACE=1` prints every console line,
 with its time, and the driver's phases to stderr as they happen (a native

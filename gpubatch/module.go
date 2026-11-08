@@ -33,6 +33,8 @@ package gpubatch
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -395,6 +397,8 @@ func (in *instance) device() (Device, Errno) {
 	case errors.Is(err, ErrFallback), errors.Is(err, webgpu.ErrFallbackAdapter), errors.Is(err, webgpu.ErrNoAdapter), errors.Is(err, webgpu.ErrNoWebGPU):
 		return nil, Unsupported
 	case err != nil:
+		// caps has no context, so no last_error: stderr says why.
+		fmt.Fprintf(os.Stderr, "gpubatch: opening the GPU device failed: %v\n", err)
 		return nil, Failed
 	}
 	in.mu.Lock()

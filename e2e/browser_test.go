@@ -71,6 +71,13 @@ func serve(t *testing.T, h http.Handler) (port int, reports <-chan string) {
 			io.WriteString(w, "let i = 0; (function tick() { postMessage(i++); if (i < 100) setTimeout(tick, 5); })();")
 			return
 		}
+		if r.URL.Path == "/__memory-worker.js" {
+			w.Header().Set("Content-Type", "text/javascript")
+			w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+			w.Header().Set("Cross-Origin-Embedder-Policy", "require-corp")
+			io.WriteString(w, memoryWorker)
+			return
+		}
 		if r.URL.Path == "/__globals-worker.js" {
 			w.Header().Set("Content-Type", "text/javascript")
 			w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
