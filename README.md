@@ -293,7 +293,7 @@ renders the test pages with `engine.New()`, `EnableDoneSignal`,
 caps, a 1 GiB fetch response cap (GGUF models), 2000 requests per page, a
 4 GiB heap ceiling (the engine interprets wasm since v0.43.4 and stops a
 render past the ceiling) and `JSLog` captured (the driver is
-`e2e/webengine`, a module of its own pinned to engine v0.45.6, so this
+`e2e/webengine`, a module of its own pinned to engine v0.45.8, so this
 module's dependency graph does not grow).
 It fails, never skips, and every failure names the missing capabilities
 ("no Worker", "no navigator.gpu", ...) from a probe page that reports each
@@ -306,12 +306,13 @@ where. The worker probe also runs what go-gfx/webgpu needs for compute: a
 storage-buffer dispatch with an explicit pipeline layout, read back with
 `mapAsync`; and the container path: i64 arguments as BigInt, and a
 worker's exported shared memory posted to its creator, then grown by the
-guest's `memory.grow`, seen grown there. On v0.45.6 the ONNX lane passes on
-Metal: 123 of 123 cases, MNIST-12 max |error| 3.1e-05, as in Chromium; the
-no-GPU, quota and refusal container cases pass. Still open in go-webengine's
-WGSL-to-MSL translator: pointers (`&`, the CPU-checked batch kernels), and
-shader errors reported when the pipeline is built instead of at
-`createShaderModule`.
+guest's `memory.grow`, seen grown there. On v0.45.8 every test of the lane
+passes on Apple Metal: the probe, all six container cases (the batch kernels
+equal the CPU on 262144 elements, the GPU refuses invalid WGSL at
+`createShaderModule`) and 123 of 123 ONNX cases (MNIST-12 max |error|
+3.1e-05, as in Chromium). go-webengine interprets wasm, so it is far slower
+than a browser here (the ONNX cases take 14.5 s of compute against well under
+1 s in Chromium; one run, not a measurement).
 
 Debugging the lane: `GPU_E2E_WEBENGINE_TRACE=1` prints every console line,
 with its time, and the driver's phases to stderr as they happen (a native

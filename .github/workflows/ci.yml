@@ -198,13 +198,13 @@ jobs:
           cat "$RUNNER_TEMP/e2e.log"
           exit $status
 
-  # go-webengine (pure-Go engine of the go-webengine org, engine v0.45.6,
+  # go-webengine (pure-Go engine of the go-webengine org, engine v0.45.8,
   # pinned in e2e/webengine/go.mod, a module of its own). Its navigator.gpu
-  # (M5) is Metal, so the job runs on macOS. NON-BLOCKING and EXPECTED RED:
-  # the ONNX lane passes there (123/123); its WGSL-to-MSL translator does not
-  # take pointers yet, and reports shader errors late.
+  # (M5) is Metal, so the job runs on macOS. Every test passes on an Apple
+  # Silicon Mac since v0.45.8; NON-BLOCKING until it has held on GitHub's
+  # macOS runners too.
   webgpu-webengine:
-    name: go-webengine e2e (expected red until its worker globals)
+    name: go-webengine e2e
     runs-on: macos-latest
     continue-on-error: true
     timeout-minutes: 20
