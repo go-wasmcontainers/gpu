@@ -9,6 +9,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -150,7 +151,14 @@ func RootCmd() *cobra.Command {
 			})
 			srv := &http.Server{Handler: mux}
 			go srv.Serve(ln)
-			defer srv.Close()
+			// Shutdown, not Close: the /report handler hands the report over
+			// before its response is written, and Close would cut that
+			// response off (the browser's fetch, or a test's Post, sees EOF).
+			defer func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				srv.Shutdown(ctx)
+			}()
 			url := fmt.Sprintf("http://localhost:%d/?%s", ln.Addr().(*net.TCPAddr).Port, query)
 			if noLaunch {
 				fmt.Fprintln(cmd.ErrOrStderr(), "open", url)
