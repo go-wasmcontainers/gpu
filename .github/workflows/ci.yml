@@ -198,11 +198,11 @@ jobs:
           cat "$RUNNER_TEMP/e2e.log"
           exit $status
 
-  # go-webengine (pure-Go engine of the go-webengine org, engine v0.45.3,
+  # go-webengine (pure-Go engine of the go-webengine org, engine v0.45.6,
   # pinned in e2e/webengine/go.mod, a module of its own). Its navigator.gpu
   # (M5) is Metal, so the job runs on macOS. NON-BLOCKING and EXPECTED RED:
-  # GPU containers run there; its WGSL-to-MSL translator does not take
-  # helper function calls or pointers yet.
+  # the ONNX lane passes there (123/123); its WGSL-to-MSL translator does not
+  # take pointers yet, and reports shader errors late.
   webgpu-webengine:
     name: go-webengine e2e (expected red until its worker globals)
     runs-on: macos-latest
