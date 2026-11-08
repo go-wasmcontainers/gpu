@@ -306,11 +306,15 @@ where. The worker probe also runs what go-gfx/webgpu needs for compute: a
 storage-buffer dispatch with an explicit pipeline layout, read back with
 `mapAsync`; and the container path: i64 arguments as BigInt, and a
 worker's exported shared memory posted to its creator, then grown by the
-guest's `memory.grow`, seen grown there. On v0.45.8 every test of the lane
-passes on Apple Metal: the probe, all six container cases (the batch kernels
-equal the CPU on 262144 elements, the GPU refuses invalid WGSL at
+guest's `memory.grow`, seen grown there. On v0.45.8, on Apple Metal, the
+probe, the six container cases of `TestBatchComputeContainers` (the batch
+kernels equal the CPU on 262144 elements, the GPU refuses invalid WGSL at
 `createShaderModule`) and 123 of 123 ONNX cases (MNIST-12 max |error|
-3.1e-05, as in Chromium). go-webengine interprets wasm, so it is far slower
+3.1e-05, as in Chromium) pass. Three other batch tests still fail there: its
+translator does not read hex literals such as `0xFFFFFFFFu`, which the
+loop-budget rewrite injects (`TestBatchDeadline`, `TestBatchComputeQuota`),
+and `forceFallbackAdapter` still returns the hardware adapter
+(`TestBatchFallbackRefused`). go-webengine interprets wasm, so it is far slower
 than a browser here (the ONNX cases take 14.5 s of compute against well under
 1 s in Chromium; one run, not a measurement).
 

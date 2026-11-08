@@ -200,9 +200,10 @@ jobs:
 
   # go-webengine (pure-Go engine of the go-webengine org, engine v0.45.8,
   # pinned in e2e/webengine/go.mod, a module of its own). Its navigator.gpu
-  # (M5) is Metal, so the job runs on macOS. Every test passes on an Apple
-  # Silicon Mac since v0.45.8; NON-BLOCKING until it has held on GitHub's
-  # macOS runners too.
+  # (M5) is Metal, so the job runs on macOS. NON-BLOCKING: on v0.45.8 the
+  # probe, the container cases and the ONNX cases pass; TestBatchDeadline,
+  # TestBatchComputeQuota (hex literals) and TestBatchFallbackRefused
+  # (forceFallbackAdapter) do not yet.
   webgpu-webengine:
     name: go-webengine e2e
     runs-on: macos-latest
