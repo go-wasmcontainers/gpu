@@ -59,18 +59,36 @@ type Probe struct {
 	Architecture string `json:"architecture,omitempty"`
 	Fallback     bool   `json:"fallback"`
 	Error        string `json:"error,omitempty"`
+	// Description and Device are the adapter's free-text identity (Dawn fills
+	// the description with the driver's name, e.g. "Radv ..."); with several
+	// GPUs they say which one --power chose.
+	Description string `json:"description,omitempty"`
+	Device      string `json:"device,omitempty"`
+	// SubgroupMin and SubgroupMax are adapter.info.subgroupMinSize/MaxSize
+	// (0 when the browser does not report them).
+	SubgroupMin int `json:"subgroupMinSize,omitempty"`
+	SubgroupMax int `json:"subgroupMaxSize,omitempty"`
+	// Features and Limits are what the adapter reports (every limit that is
+	// a number), so each lane records what it ran on.
+	Features []string           `json:"features,omitempty"`
+	Limits   map[string]float64 `json:"limits,omitempty"`
 }
 
 // probeJS runs in the page and in a worker it starts.
-const probeJS = `async function probe() {
+const probeJS = `async function probe(power) {
   const r = { hasGPU: !!(self.navigator && navigator.gpu), adapter: false, fallback: false };
   if (!r.hasGPU) return r;
   try {
-    const a = await navigator.gpu.requestAdapter();
+    const a = await navigator.gpu.requestAdapter(power ? {powerPreference: power} : {});
     if (!a) return r;
     r.adapter = true;
     const info = a.info || {};
     r.vendor = info.vendor || ""; r.architecture = info.architecture || "";
+    r.description = info.description || ""; r.device = info.device || "";
+    r.subgroupMinSize = info.subgroupMinSize || 0; r.subgroupMaxSize = info.subgroupMaxSize || 0;
+    r.features = Array.from(a.features || []).sort();
+    r.limits = {};
+    for (const k in a.limits) if (typeof a.limits[k] === "number") r.limits[k] = a.limits[k];
     r.fallback = !!(info.isFallbackAdapter || a.isFallbackAdapter);
   } catch (e) { r.error = String(e); }
   return r;
@@ -141,8 +159,8 @@ const canvasJS = `async function canvasProbe() {
 const page = `<!doctype html><meta charset=utf-8><script>
 ` + probeJS + `
 ` + canvasJS + `
-window.probeWorker = () => new Promise((res) => {
-  const src = probe.toString() + "; probe().then(r => postMessage(r));";
+window.probeWorker = (power) => new Promise((res) => {
+  const src = probe.toString() + "; probe(" + JSON.stringify(power || "") + ").then(r => postMessage(r));";
   const w = new Worker(URL.createObjectURL(new Blob([src], {type: "text/javascript"})));
   w.onmessage = (e) => res(e.data);
   w.onerror = (e) => res({ hasGPU: false, error: String(e.message) });
@@ -166,7 +184,7 @@ window.probeCanvas = () => new Promise((res) => {
 
 // RootCmd is the command, for tests.
 func RootCmd() *cobra.Command {
-	var browser, args, channel string
+	var browser, args, channel, power, executable string
 	var tries []string
 	var headed, canvas bool
 	cmd := &cobra.Command{
@@ -178,7 +196,7 @@ func RootCmd() *cobra.Command {
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")
 			if len(tries) == 0 {
-				rep, err := run(browser, args, channel, headed, canvas)
+				rep, err := run(browser, args, channel, power, executable, headed, canvas)
 				if err != nil {
 					return err
 				}
@@ -189,7 +207,7 @@ func RootCmd() *cobra.Command {
 			var reps []*Report
 			for _, t := range tries {
 				all := strings.TrimSpace(args + " " + t)
-				rep, err := run(browser, all, channel, headed, canvas)
+				rep, err := run(browser, all, channel, power, executable, headed, canvas)
 				if err != nil {
 					rep = &Report{Browser: browser, UserArgs: all, Window: Probe{Error: err.Error()}}
 				}
@@ -202,12 +220,19 @@ func RootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&browser, "browser", "chromium", "chromium, firefox or webkit")
 	cmd.Flags().StringVar(&args, "args", "", "extra browser arguments, space-separated (e.g. --enable-unsafe-webgpu)")
 	cmd.Flags().StringVar(&channel, "channel", "", `browser channel ("chromium": the full browser in new headless mode, not the headless shell)`)
+	cmd.Flags().StringVar(&power, "power", "", `requestAdapter powerPreference: "high-performance" or "low-power" (default: none, the browser chooses)`)
+	cmd.Flags().StringVar(&executable, "executable", "", "path of a system browser to drive instead of Playwright's (e.g. /snap/bin/chromium)")
 	cmd.Flags().BoolVar(&headed, "headed", false, "show the browser window")
 	cmd.Flags().BoolVar(&canvas, "canvas", false, "also follow a WebGPU OffscreenCanvas frame from the GPU to the page")
 	return cmd
 }
 
-func run(browser, args, channel string, headed, canvas bool) (*Report, error) {
+func jsString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+func run(browser, args, channel, power, executable string, headed, canvas bool) (*Report, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
@@ -239,6 +264,9 @@ func run(browser, args, channel string, headed, canvas bool) (*Report, error) {
 	if channel != "" {
 		opts.Channel = playwright.String(channel)
 	}
+	if executable != "" {
+		opts.ExecutablePath, opts.Channel = playwright.String(executable), nil
+	}
 	if args != "" {
 		opts.Args = strings.Fields(args)
 	}
@@ -259,7 +287,7 @@ func run(browser, args, channel string, headed, canvas bool) (*Report, error) {
 	for _, c := range []struct {
 		expr string
 		dst  *Probe
-	}{{"probe()", &rep.Window}, {"probeWorker()", &rep.Worker}} {
+	}{{"probe(" + jsString(power) + ")", &rep.Window}, {"probeWorker(" + jsString(power) + ")", &rep.Worker}} {
 		v, err := p.Evaluate(c.expr)
 		if err != nil {
 			c.dst.Error = err.Error()
