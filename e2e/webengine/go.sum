@@ -33,10 +33,10 @@ github.com/go-images/jpeg2000 v0.14.0 h1:/nH3l5r95E7OkNZCfq7gmoDQvJzVAhmSw6rd2If
 github.com/go-images/jpeg2000 v0.14.0/go.mod h1:4/Pp3Jp2es5lA8/Ema8F7dFwl0vZprCj9MyznIz9Gdc=
 github.com/go-images/png v0.2.0 h1:RFPkHPuRYRvrDJol/Mmn9P1DSaLV8VPmEQ8BkZoCpL0=
 github.com/go-images/png v0.2.0/go.mod h1:g1qayDmWLClHo9R5KQ+RrcUNTBcaA4c1thaIfEoS3vg=
-github.com/go-macos/metal v0.4.0 h1:ERTfSLg22hWXHXmdycxdkouGIy2DHPeJ2FTC4AEnHgI=
-github.com/go-macos/metal v0.4.0/go.mod h1:hBo7rsFUmsBmhFQEPJ5q277+wBMLMRgCeAusXaUK98w=
-github.com/go-macos/objc v0.11.2 h1:d6+Zf3SA4zpclfFDcLB6Ttlb3o7cXt8Ah1oGhC+5/C8=
-github.com/go-macos/objc v0.11.2/go.mod h1:G2YcKu5C2Xs08vcM/CUUUeYUi9YeCHmkWcW+5RGwE/g=
+github.com/go-macos/metal v0.6.1 h1:OSsbs3HFScp8x8GPrURoB6ntEp7I77TF1YxZcGbl2Ls=
+github.com/go-macos/metal v0.6.1/go.mod h1:BiclSGJgONDekug12CQtlINic9zMmXF7m/iA7bQn4hM=
+github.com/go-macos/objc v0.12.0 h1:/WmB4C1CQd5RkqBRvnHNljEFtOTvytPA9fkD87xuJVQ=
+github.com/go-macos/objc v0.12.0/go.mod h1:ao+SmTFBrkZdP+488hFTrSFvCtJ36McKKhNNOlcFXrQ=
 github.com/go-opentype/fonts v0.14.0 h1:WHw7k9gkHT1pu9B2yyvd0FWyQqn/4NKFQoKhvMYt3Mo=
 github.com/go-opentype/fonts v0.14.0/go.mod h1:od2QcmdpKo7QCqo6Jb16y4GULk+h2Hhfq6x3xfvn62Q=
 github.com/go-opentype/opentype v0.16.2-0.20261027113239-5e69589e9a5e h1:SxBkVzp042LB0X7Ndu0WntqCVaewOm4DwikQYHenP5A=
@@ -45,8 +45,8 @@ github.com/go-simd/highway v0.0.14 h1:O3HPG00qgLGlrQyYBlMGyLYsuzZrqHA4+XNptPjV5g
 github.com/go-simd/highway v0.0.14/go.mod h1:t5XBPxqa10Lnj0frQS7Ur0JaN+/CckEmm5HXrqBDxXA=
 github.com/go-sourcemap/sourcemap v2.1.4+incompatible h1:a+iTbH5auLKxaNwQFg0B+TCYl6lbukKPc7b5x0n1s6Q=
 github.com/go-sourcemap/sourcemap v2.1.4+incompatible/go.mod h1:F8jJfvm2KbVjc5NqelyYJmf/v5J0dwNLS2mL4sNA1Jg=
-github.com/go-webengine/engine v0.41.0 h1:jGTXDgSRrNRv0216byJa8lPkDGXeXfOp/9s5WgAQvDU=
-github.com/go-webengine/engine v0.41.0/go.mod h1:OwOS/T2pf/ye39SMV/q72AFRK0CPwAjm1rdrPzJwzGQ=
+github.com/go-webengine/engine v0.44.0 h1:36dwVgoJei3ONR50qm8csSHgz/wiXicUatvGzCWd+Rc=
+github.com/go-webengine/engine v0.44.0/go.mod h1:qJMIs5Myt3FUPJntBiz8zkIFpV3zaaE8AiKKhyxaf0c=
 github.com/go-webengine/esbuildsandbox v0.1.0 h1:1LdmX+0/yJarQlxZgJ7JIMu+Qy6P7Yzu4NFcX9+jFl8=
 github.com/go-webengine/esbuildsandbox v0.1.0/go.mod h1:za8oj1vbDfVkTpHLeRk7JfEQjmJfj+GHNq4R47681vQ=
 github.com/go-widgets/painter v0.16.0 h1:j8FFObisySQChY2JiXS7Di2Mo4cqufIc0PDUnoDPMiA=

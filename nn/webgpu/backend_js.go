@@ -5,6 +5,7 @@ package webgpu
 import (
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
@@ -79,6 +80,8 @@ func (b Backend) Load(builders [][]byte, _ nn.Target) (nn.Graph, nn.Errno) {
 	}
 	d, err := newGPUDevice(b.AllowFallback, mem, lb)
 	if err != nil {
+		// The errno cannot carry why; stderr reaches the worker's console.
+		fmt.Fprintf(os.Stderr, "nn/webgpu: no GPU device: %v\n", err)
 		return nil, nn.UnsupportedOperation // no GPU here: never the CPU instead
 	}
 	return &graph{s: s, dev: d}, nn.Success

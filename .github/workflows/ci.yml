@@ -198,13 +198,12 @@ jobs:
           cat "$RUNNER_TEMP/e2e.log"
           exit $status
 
-  # go-webengine (pure-Go engine of the go-webengine org, engine v0.41.0,
+  # go-webengine (pure-Go engine of the go-webengine org, engine v0.44.0,
   # pinned in e2e/webengine/go.mod, a module of its own). Its navigator.gpu
-  # (M5) is Metal, so the job runs on macOS. NON-BLOCKING and EXPECTED RED
-  # until its dedicated workers have every global the compute workers use
-  # (WebGPU features.values, error scopes, constants and explicit layouts
-  # are still missing): the probe names each one, inside a worker, in every
-  # failure.
+  # (M5) is Metal, so the job runs on macOS. NON-BLOCKING and EXPECTED RED:
+  # the probe passes, the ONNX cases need createBindGroup on a buffer
+  # sub-range, and the container test hangs while the engine worker serves
+  # its container workers.
   webgpu-webengine:
     name: go-webengine e2e (expected red until its worker globals)
     runs-on: macos-latest

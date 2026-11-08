@@ -297,22 +297,42 @@ func renderInEngine(t *testing.T, url string, timeout time.Duration) engineRun {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout+time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "-url", url, "-timeout", timeout.String())
+	args := []string{bin, "-url", url, "-timeout", timeout.String()}
+	// GPU_E2E_WEBENGINE_WRAP runs the driver under another program, for
+	// example a debugger that prints the native stacks of a crash (split on
+	// spaces, no quoting: put lldb's commands in files):
+	//   GPU_E2E_WEBENGINE_WRAP='lldb --batch -s run.txt -K crash.txt --'
+	if w := strings.Fields(os.Getenv("GPU_E2E_WEBENGINE_WRAP")); len(w) > 0 {
+		args = append(w, args...)
+	}
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.WaitDelay = 5 * time.Second
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if ctx.Err() != nil {
-		t.Fatalf("go-webengine driver killed after %v: the engine did not finish the page", timeout+time.Minute)
+		t.Fatalf("go-webengine driver killed after %v: the engine did not finish the page\nstdout (last 16 KiB): %s\nstderr (last 16 KiB): %s",
+			timeout+time.Minute, tail(string(out), 16<<10), tail(stderr.String(), 16<<10))
 	}
 	if err != nil {
 		t.Fatalf("go-webengine driver: %v\n%s", err, stderr.String())
+	}
+	if os.Getenv("GPU_E2E_WEBENGINE_TRACE") != "" {
+		t.Logf("go-webengine driver stderr (last 32 KiB):\n%s", tail(stderr.String(), 32<<10))
 	}
 	var r engineRun
 	if err := json.Unmarshal(out, &r); err != nil {
 		t.Fatalf("go-webengine driver output: %v\n%.500s", err, out)
 	}
 	return r
+}
+
+// tail is the last n bytes of s.
+func tail(s string, n int) string {
+	if len(s) > n {
+		return "..." + s[len(s)-n:]
+	}
+	return s
 }
 
 // lastN is the last n lines of a console log.
