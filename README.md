@@ -293,7 +293,7 @@ renders the test pages with `engine.New()`, `EnableDoneSignal`,
 caps, a 1 GiB fetch response cap (GGUF models), 2000 requests per page, a
 4 GiB heap ceiling (the engine interprets wasm since v0.43.4 and stops a
 render past the ceiling) and `JSLog` captured (the driver is
-`e2e/webengine`, a module of its own pinned to engine v0.45.2, so this
+`e2e/webengine`, a module of its own pinned to engine v0.45.3, so this
 module's dependency graph does not grow).
 It fails, never skips, and every failure names the missing capabilities
 ("no Worker", "no navigator.gpu", ...) from a probe page that reports each
@@ -306,10 +306,12 @@ where. The worker probe also runs what go-gfx/webgpu needs for compute: a
 storage-buffer dispatch with an explicit pipeline layout, read back with
 `mapAsync`; and the container path: i64 arguments as BigInt, and a
 worker's exported shared memory posted to its creator, then grown by the
-guest's `memory.grow`, seen grown there. On v0.45.2 the GPU containers
-run on Metal: the no-GPU and quota cases pass, and five of the eight
-refusals behave as in Chromium; every other case, and the ONNX cases, stop
-at the one missing piece, `createBindGroup` on a buffer sub-range.
+guest's `memory.grow`, seen grown there. On v0.45.3 the GPU containers
+run on Metal: the no-GPU, quota and refusal cases pass, and 26 of the 123
+ONNX cases. What stops the rest is go-webengine's WGSL-to-MSL translator:
+helper function calls (every remaining ONNX case), pointers (`&`), and
+shader errors reported when the pipeline is built instead of at
+`createShaderModule`.
 
 Debugging the lane: `GPU_E2E_WEBENGINE_TRACE=1` prints every console line,
 with its time, and the driver's phases to stderr as they happen (a native

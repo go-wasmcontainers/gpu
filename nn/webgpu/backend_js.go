@@ -175,6 +175,8 @@ func (c *context) Compute() nn.Errno {
 	}
 	got, shapes, err := c.exec.run(floats, names)
 	if err != nil {
+		// The errno cannot carry why; stderr reaches the worker's console.
+		fmt.Fprintf(os.Stderr, "nn/webgpu: compute failed: %v\n", err)
 		if errors.Is(err, errUnsupported) {
 			return nn.UnsupportedOperation
 		}
