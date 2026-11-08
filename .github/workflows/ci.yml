@@ -198,11 +198,11 @@ jobs:
           cat "$RUNNER_TEMP/e2e.log"
           exit $status
 
-  # go-webengine (pure-Go engine of the go-webengine org, engine v0.44.5,
+  # go-webengine (pure-Go engine of the go-webengine org, engine v0.45.2,
   # pinned in e2e/webengine/go.mod, a module of its own). Its navigator.gpu
   # (M5) is Metal, so the job runs on macOS. NON-BLOCKING and EXPECTED RED:
-  # containers run, but a worker has no Blob (go-gfx/webgpu's replay script)
-  # and createBindGroup takes no buffer sub-range (the ONNX cases).
+  # GPU containers run there, but createBindGroup takes no buffer sub-range
+  # yet, which every remaining case needs.
   webgpu-webengine:
     name: go-webengine e2e (expected red until its worker globals)
     runs-on: macos-latest
