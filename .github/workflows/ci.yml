@@ -198,16 +198,14 @@ jobs:
           cat "$RUNNER_TEMP/e2e.log"
           exit $status
 
-  # go-webengine (pure-Go engine of the go-webengine org, engine v0.45.8,
+  # go-webengine (pure-Go engine of the go-webengine org, engine v0.45.9,
   # pinned in e2e/webengine/go.mod, a module of its own). Its navigator.gpu
-  # (M5) is Metal, so the job runs on macOS. NON-BLOCKING: on v0.45.8 the
-  # probe, the container cases and the ONNX cases pass; TestBatchDeadline,
-  # TestBatchComputeQuota (hex literals) and TestBatchFallbackRefused
-  # (forceFallbackAdapter) do not yet.
+  # (M5) is Metal, so the job runs on macOS. Blocking since v0.45.9: the
+  # probe, every batch test, and the ONNX cases pass. TestBatchFallbackRefused
+  # skips: the engine has no software adapter to refuse.
   webgpu-webengine:
     name: go-webengine e2e
     runs-on: macos-latest
-    continue-on-error: true
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7

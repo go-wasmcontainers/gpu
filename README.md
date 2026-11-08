@@ -278,7 +278,7 @@ drives a system browser instead of Playwright's.
 | Firefox | Linux | not supported (MDN browser-compat-data `api.GPU`, bug 2006676) | none |
 | Safari 27.2 | macOS 27, Apple M4 Max | yes (since 26), adapter reported as vendor `apple`, architecture `apple`, not a fallback; `shader-f16` yes, `subgroups` no here | passes locally through safaridriver (batch module, refusals, quota, 123/123 ONNX cases, MNIST-12 within 3.1e-5; no GPU sanction on legitimate work, longest submit 11.7 ms; **the hostile-shader run does not pass**: WebKit's own watchdog destroys a 3 s shader and then refuses adapters, see docs/gpu-scheduling.md) |
 | Safari 27.2 / 26.6.2 | GitHub macOS runners (`macos-15`, `macos-26`; virtual machines) | no: `macos-15` has no `navigator.gpu`, `macos-26` answers `requestAdapter` with null | no CI lane (the lane fails there; WebKit excludes VMs) |
-| go-webengine engine v0.30.0 | pure Go, any platform | no WebGPU: since v0.30.0 Worker, SharedArrayBuffer and its views, Atomics, posting a SAB or a view, crossOriginIsolated (and its negative control: none without COOP/COEP), unsolicited worker messages, WebAssembly and `fetch` are green; OPFS, OffscreenCanvas and navigator.gpu are missing | **expected red** until go-webengine M4 (OPFS) and M5 (navigator.gpu); non-blocking CI job |
+| go-webengine engine v0.45.9 | pure Go; `navigator.gpu` on Metal, so macOS | yes (Metal, a hardware adapter; no software adapter: `forceFallbackAdapter` resolves null) | passes locally and on GitHub's macOS runner (probe, batch module, deadline, compute quota, 123/123 ONNX cases, MNIST-12 within 3.1e-5); blocking CI job |
 
 Adapter selection: every `requestAdapter` the module makes (`gpubatch`,
 `webgpu`, `nn/webgpu`) passes `powerPreference: "high-performance"`
@@ -293,7 +293,7 @@ renders the test pages with `engine.New()`, `EnableDoneSignal`,
 caps, a 1 GiB fetch response cap (GGUF models), 2000 requests per page, a
 4 GiB heap ceiling (the engine interprets wasm since v0.43.4 and stops a
 render past the ceiling) and `JSLog` captured (the driver is
-`e2e/webengine`, a module of its own pinned to engine v0.45.8, so this
+`e2e/webengine`, a module of its own pinned to engine v0.45.9, so this
 module's dependency graph does not grow).
 It fails, never skips, and every failure names the missing capabilities
 ("no Worker", "no navigator.gpu", ...) from a probe page that reports each
@@ -306,15 +306,15 @@ where. The worker probe also runs what go-gfx/webgpu needs for compute: a
 storage-buffer dispatch with an explicit pipeline layout, read back with
 `mapAsync`; and the container path: i64 arguments as BigInt, and a
 worker's exported shared memory posted to its creator, then grown by the
-guest's `memory.grow`, seen grown there. On v0.45.8, on Apple Metal, the
+guest's `memory.grow`, seen grown there. On v0.45.9, on Apple Metal, the
 probe, the six container cases of `TestBatchComputeContainers` (the batch
 kernels equal the CPU on 262144 elements, the GPU refuses invalid WGSL at
-`createShaderModule`) and 123 of 123 ONNX cases (MNIST-12 max |error|
-3.1e-05, as in Chromium) pass. Three other batch tests still fail there: its
-translator does not read hex literals such as `0xFFFFFFFFu`, which the
-loop-budget rewrite injects (`TestBatchDeadline`, `TestBatchComputeQuota`),
-and `forceFallbackAdapter` still returns the hardware adapter
-(`TestBatchFallbackRefused`). go-webengine interprets wasm, so it is far slower
+`createShaderModule`), `TestBatchDeadline` (the loop-budget rewrite cuts a
+3 s shader after 105 ms and the grant is revoked), `TestBatchComputeQuota`
+and 123 of 123 ONNX cases (MNIST-12 max |error| 3.1e-05, as in Chromium)
+pass. `TestBatchFallbackRefused` skips: go-webengine has no software
+adapter, so a container can never be offered one there. The job is
+blocking since v0.45.9. go-webengine interprets wasm, so it is far slower
 than a browser here (the ONNX cases take 14.5 s of compute against well under
 1 s in Chromium; one run, not a measurement).
 
