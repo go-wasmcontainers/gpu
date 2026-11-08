@@ -30,6 +30,7 @@ import (
 	"github.com/go-wasmcontainers/engine/runtime/browser"
 	"github.com/go-wasmcontainers/engine/wasi"
 	"github.com/go-wasmcontainers/gpu/gpubatch"
+	"github.com/go-wasmcontainers/gpu/internal/adapter"
 	"github.com/go-wasmcontainers/gpu/nn"
 	nnwebgpu "github.com/go-wasmcontainers/gpu/nn/webgpu"
 	"github.com/go-wasmcontainers/gpu/onnx"
@@ -147,7 +148,7 @@ func main() {
 	allow := param("fallback") == 1
 	if g, err := wg.Navigator(); err != nil {
 		rep.AdapterError = "navigator.gpu: " + err.Error()
-	} else if a, err := g.RequestAdapter(context.Background(), &wg.RequestAdapterOptions{AllowFallback: true}); err != nil {
+	} else if a, err := g.RequestAdapter(context.Background(), adapter.Options(true)); err != nil {
 		rep.AdapterError = "requestAdapter: " + err.Error()
 	} else {
 		rep.Adapter = a.Info()

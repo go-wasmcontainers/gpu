@@ -12,6 +12,7 @@ import (
 
 	wg "github.com/go-gfx/webgpu"
 	"github.com/go-gfx/webgpu/batch"
+	"github.com/go-wasmcontainers/gpu/internal/adapter"
 )
 
 // gpuDevice runs the kernels on a WebGPU device (github.com/go-gfx/webgpu).
@@ -34,7 +35,7 @@ func newGPUDevice(allowFallback bool, limit int64, loopBudget *batch.LoopBudget)
 		return nil, err
 	}
 	ctx := stdctx.Background()
-	a, err := g.RequestAdapter(ctx, &wg.RequestAdapterOptions{AllowFallback: allowFallback})
+	a, err := g.RequestAdapter(ctx, adapter.Options(allowFallback))
 	if err != nil {
 		return nil, err
 	}

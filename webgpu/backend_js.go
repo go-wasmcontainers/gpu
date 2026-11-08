@@ -12,6 +12,7 @@ import (
 
 	wg "github.com/go-gfx/webgpu"
 	"github.com/go-gfx/webgpu/batch"
+	"github.com/go-wasmcontainers/gpu/internal/adapter"
 	"github.com/go-wasmcontainers/gpu/wit"
 )
 
@@ -409,7 +410,7 @@ func (s *session) Call(name string, a []any) (any, error) {
 		}
 		// A fallback adapter is refused unless allowed: a software
 		// adapter is not offered as a GPU.
-		ad, err := g.RequestAdapter(ctx, &wg.RequestAdapterOptions{AllowFallback: s.b.AllowFallback})
+		ad, err := g.RequestAdapter(ctx, adapter.Options(s.b.AllowFallback))
 		if err != nil {
 			return nil, nil
 		}
