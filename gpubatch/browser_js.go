@@ -12,6 +12,7 @@ import (
 	wg "github.com/go-gfx/webgpu"
 	"github.com/go-gfx/webgpu/batch"
 	"github.com/go-virtio/gpu/wgpubatch"
+	"github.com/go-wasmcontainers/gpu/internal/adapter"
 )
 
 // Browser is the Provider in the browser: one WebGPU device per container,
@@ -67,7 +68,7 @@ func (b Browser) Open(memory int64) (Device, error) {
 	if err := wg.InstallReplay(ctx, b.ReplayURL); err != nil {
 		return nil, fmt.Errorf("gpubatch: %w", err)
 	}
-	ad, err := g.RequestAdapter(ctx, &wg.RequestAdapterOptions{AllowFallback: b.AllowFallback})
+	ad, err := g.RequestAdapter(ctx, adapter.Options(b.AllowFallback))
 	if err != nil {
 		return nil, err // ErrNoAdapter, ErrFallbackAdapter
 	}
@@ -233,7 +234,7 @@ func (b Browser) drainOnce(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			ad, err := g.RequestAdapter(ctx, &wg.RequestAdapterOptions{AllowFallback: b.AllowFallback})
+			ad, err := g.RequestAdapter(ctx, adapter.Options(b.AllowFallback))
 			if err != nil {
 				return err
 			}

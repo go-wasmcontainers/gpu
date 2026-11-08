@@ -276,6 +276,13 @@ on SwiftShader (labelled fallback: proves the WGSL, not a GPU).
 | Safari 27.2 / 26.6.2 | GitHub macOS runners (`macos-15`, `macos-26`; virtual machines) | no: `macos-15` has no `navigator.gpu`, `macos-26` answers `requestAdapter` with null | no CI lane (the lane fails there; WebKit excludes VMs) |
 | go-webengine engine v0.30.0 | pure Go, any platform | no WebGPU: since v0.30.0 Worker, SharedArrayBuffer and its views, Atomics, posting a SAB or a view, crossOriginIsolated (and its negative control: none without COOP/COEP), unsolicited worker messages, WebAssembly and `fetch` are green; OPFS, OffscreenCanvas and navigator.gpu are missing | **expected red** until go-webengine M4 (OPFS) and M5 (navigator.gpu); non-blocking CI job |
 
+Adapter selection: every `requestAdapter` the module makes (`gpubatch`,
+`webgpu`, `nn/webgpu`) passes `powerPreference: "high-performance"`
+(`internal/adapter`). Without it, a browser on a PC with an integrated and a
+discrete GPU returns the integrated one: Chromium 157 on Linux picked the
+Ryzen iGPU (`rdna-2`) over a Radeon PRO W7700 (`rdna-3`) until this was set
+(gpu#23). Browsers with one GPU, and software adapters, are unaffected.
+
 The go-webengine lane (`GPU_E2E_BROWSER=webengine go test -tags e2e ./e2e/`)
 renders the test pages with `engine.New()`, `EnableDoneSignal`,
 `EnableWebGPU` (Metal, so macOS only), an OPFS root per run, raised wasm

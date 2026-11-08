@@ -22,6 +22,7 @@ import (
 	"time"
 
 	wg "github.com/go-gfx/webgpu"
+	"github.com/go-wasmcontainers/gpu/internal/adapter"
 	"github.com/go-wasmcontainers/gpu/nn"
 	"github.com/go-wasmcontainers/gpu/nn/webgpu"
 	"github.com/go-wasmcontainers/gpu/onnx"
@@ -57,7 +58,7 @@ func adapterInfo() (wg.AdapterInfo, error) {
 	if err != nil {
 		return wg.AdapterInfo{}, err
 	}
-	a, err := g.RequestAdapter(context.Background(), &wg.RequestAdapterOptions{AllowFallback: true})
+	a, err := g.RequestAdapter(context.Background(), adapter.Options(true))
 	if err != nil {
 		return wg.AdapterInfo{}, err
 	}
