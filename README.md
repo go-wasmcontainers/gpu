@@ -260,13 +260,17 @@ MNIST-12 through Playwright. Measured on an Apple Metal adapter (Chromium
 143, new headless): **123/123 pass**, MNIST-12 within 3.1e-5 of the
 reference. The CI lanes: macOS (must get a GPU adapter, or fail) and Linux
 on SwiftShader (labelled fallback: proves the WGSL, not a GPU).
-`internal/cmd/gpuprobe` reports what adapter a browser offers.
+`internal/cmd/gpuprobe` reports what adapter a browser offers: vendor,
+architecture, subgroup sizes, features and every numeric limit, for the
+`--power high-performance|low-power` preference, and with `--executable` it
+drives a system browser instead of Playwright's.
 
 ### Browser support
 
 | Browser | Platform | WebGPU | e2e (batch module, ONNX tests, MNIST, refusals, 2 s deadline) |
 |---|---|---|---|
 | Chromium 151 | macOS, Apple M4 Max (Metal) | yes | passes (123/123 ONNX cases) |
+| Chromium 157 (snap) | Ubuntu 24.04, AMD Radeon PRO W7700 (RDNA 3, Mesa RADV 25.2.8, Vulkan) | only with `--enable-unsafe-webgpu --enable-features=Vulkan --use-angle=vulkan --ignore-gpu-blocklist`, and `--use-webgpu-power-preference=force-high-performance` to get the W7700: the default and `low-power` pick the Ryzen iGPU (`rdna-2`) | measured (gpu#23): 123/123 ONNX cases, MNIST-12 within 3.1e-5, batch module (6 cases), LLM oracle (32 of 32 tokens equal to llama.cpp, logits within 1.2e-6 relative of the CPU path); the other e2e tests were not run |
 | Firefox 159 | macOS 27, Apple M4 Max | yes in a normal window; `--headless` answers `requestAdapter` with null | passes, **headed** (123/123, MNIST-12 within 3.1e-5, 2 s deadline at 2000 ms) |
 | Firefox 158.0.1 | macOS runner (GitHub Actions, `macos-latest`), headed | yes (adapter not nameable; `isFallbackAdapter` false) | passes in CI (batch module, 123/123 ONNX cases, 2 s deadline) |
 | Firefox | Windows | since 141 | not run here |
