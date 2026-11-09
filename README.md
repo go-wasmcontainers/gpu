@@ -144,6 +144,20 @@ frame (all *refused*), a frame above `max_frame` (*too large*), a buffer past
 the quota (*quota exceeded*); a smaller `--gpu-memory`; and a forced
 software adapter (*unsupported*).
 
+The stream draws too, not only computes. `examples/batchcompute render` sends,
+in **one submit**:
+1. a `WriteTexture` of a 4×4 `r8uint` source;
+2. a render pass that draws an indexed quad, with vertex and index buffers,
+   `DrawIndexed` and explicit layouts, into a 64×64 `r8uint` target;
+3. a compute pass that copies the target into a storage buffer with
+   `textureLoad`, because the stream has no texture-to-buffer copy yet;
+4. a read-back of that buffer.
+
+All 4096 pixels equal the CPU's: each is `src[x%4, y%4] + x/4`, so a
+transposed axis or a shifted row would show. With the expected value broken on
+purpose, the case fails on 3840 of 4096 pixels. This is the first step of
+running go-quake1/engine's `gpuworld` inside a container (Quake level 2).
+
 **Cost of the guest crossing** (`e2e/batch_test.go` `TestBatchRoundTrip`,
 Apple M4 Max, Chromium on Metal, 1-minute load 6.4 to 7.3, medians of 30
 interleaved rounds, three runs): a read-back submit takes 315 to 375 µs at
