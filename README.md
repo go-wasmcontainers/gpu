@@ -157,6 +157,9 @@ All 4096 pixels equal the CPU's: each is `src[x%4, y%4] + x/4`, so a
 transposed axis or a shifted row would show. With the expected value broken on
 purpose, the case fails on 3840 of 4096 pixels. This is the first step of
 running go-quake1/engine's `gpuworld` inside a container (Quake level 2).
+`TestBatchRender` passes in Chromium and Firefox. go-webengine cannot draw
+yet: its `GPUDevice` has no `createTexture` (go-webengine/engine#415), so that
+lane skips this one test.
 
 **Cost of the guest crossing** (`e2e/batch_test.go` `TestBatchRoundTrip`,
 Apple M4 Max, Chromium on Metal, 1-minute load 6.4 to 7.3, medians of 30
