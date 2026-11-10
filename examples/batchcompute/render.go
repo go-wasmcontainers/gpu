@@ -19,11 +19,12 @@ import (
 //  2. a render pass draws a quad (4 vertices, 6 indices, DrawIndexed) into a
 //     64x64 r8uint target; each pixel is src[x%4, y%4] + x/4, so a transposed
 //     axis or an off-by-one row cannot pass;
-//  3. a compute pass copies the target into a storage buffer with
-//     textureLoad (the stream has no texture-to-buffer copy yet), which is
-//     copied to a MAP_READ buffer and read back.
+//  3. CopyTextureToBuffer copies the target into a MAP_READ buffer (rows
+//     padded to 256 bytes) and the stream reads it back.
 //
-// No shader has a loop, so the host's loop budget does not apply.
+// The fragment shader has a constant-bound loop of at most 64 iterations with
+// a break (go-gfx/webgpu batch.MaxRenderLoop), the one shape the host accepts
+// in a render module, and the draw is counted against the draw quota.
 const (
 	renderSize = 64
 	srcSize    = 4
@@ -41,14 +42,13 @@ struct VOut { @builtin(position) pos: vec4<f32> };
   let x = u32(i.pos.x);
   let y = u32(i.pos.y);
   let v = textureLoad(src, vec2<u32>(x % 4u, y % 4u), 0).x;
-  return vec4<u32>(v + x / 4u, 0u, 0u, 0u);
-}`
-
-const readShader = `
-@group(0) @binding(0) var tgt: texture_2d<u32>;
-@group(0) @binding(1) var<storage, read_write> out: array<u32>;
-@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-  if (id.x < 4096u) { out[id.x] = textureLoad(tgt, vec2<u32>(id.x % 64u, id.x / 64u), 0).x; }
+  // x / 4 counted by a bounded loop (x < 256).
+  var q = 0u;
+  for (var k = 0u; k < 64u; k++) {
+    if (k >= x / 4u) { break; }
+    q++;
+  }
+  return vec4<u32>(v + q, 0u, 0u, 0u);
 }`
 
 // srcTexel is the source texture's value at (x, y).
@@ -76,7 +76,7 @@ func render(s *batchsink.Sink) {
 		return b
 	}
 	src := tex(srcSize, srcSize, webgpu.TextureUsageTextureBinding|webgpu.TextureUsageCopyDst)
-	tgt := tex(renderSize, renderSize, webgpu.TextureUsageRenderAttachment|webgpu.TextureUsageTextureBinding)
+	tgt := tex(renderSize, renderSize, webgpu.TextureUsageRenderAttachment|webgpu.TextureUsageCopySrc)
 	srcView, tgtView := view(src), view(tgt)
 
 	uintTex := &webgpu.TextureBindingLayout{SampleType: webgpu.TextureSampleTypeUint, ViewDimension: webgpu.TextureViewDimension2D}
@@ -102,22 +102,9 @@ func render(s *batchsink.Sink) {
 		{Binding: 0, TextureView: srcView}}})
 	must(err)
 
-	cbgl, err := d.CreateBindGroupLayout(webgpu.BindGroupLayoutDescriptor{Entries: []webgpu.BindGroupLayoutEntry{
-		{Binding: 0, Visibility: webgpu.ShaderStageCompute, Texture: uintTex},
-		{Binding: 1, Visibility: webgpu.ShaderStageCompute, Buffer: &webgpu.BufferBindingLayout{Type: webgpu.BufferBindingTypeStorage}}}})
-	must(err)
-	cpl, err := d.CreatePipelineLayout(webgpu.PipelineLayoutDescriptor{BindGroupLayouts: []*webgpu.BindGroupLayout{cbgl}})
-	must(err)
-	cm, err := d.CreateShaderModule(webgpu.ShaderModuleDescriptor{Code: readShader})
-	must(err)
-	cpipe, err := d.CreateComputePipeline(webgpu.ComputePipelineDescriptor{Layout: cpl, Compute: webgpu.ProgrammableStage{Module: cm, EntryPoint: "main"}})
-	must(err)
 	const pixels = renderSize * renderSize
-	out := buf(4*pixels, webgpu.BufferUsageStorage|webgpu.BufferUsageCopySrc)
-	read := buf(4*pixels, webgpu.BufferUsageMapRead|webgpu.BufferUsageCopyDst)
-	cbg, err := d.CreateBindGroup(webgpu.BindGroupDescriptor{Layout: cbgl, Entries: []webgpu.BindGroupEntry{
-		{Binding: 0, TextureView: tgtView}, {Binding: 1, Buffer: out}}})
-	must(err)
+	const pitch = 256 // bytesPerRow of a texture-to-buffer copy: a multiple of 256
+	read := buf(pitch*renderSize, webgpu.BufferUsageMapRead|webgpu.BufferUsageCopyDst)
 
 	verts := buf(4*8, webgpu.BufferUsageVertex|webgpu.BufferUsageCopyDst)
 	idx := buf(6*4, webgpu.BufferUsageIndex|webgpu.BufferUsageCopyDst)
@@ -142,13 +129,10 @@ func render(s *batchsink.Sink) {
 	p.SetIndexBuffer(idx, webgpu.IndexFormatUint32, 0, 6*4)
 	p.DrawIndexed(6, 1, 0, 0, 0)
 	must(p.End())
-	c := rec.BeginComputePass()
-	c.SetPipeline(cpipe)
-	c.SetBindGroup(0, cbg)
-	c.DispatchWorkgroups(pixels/64, 1, 1)
-	must(c.End())
-	rec.CopyBufferToBuffer(out, 0, read, 0, 4*pixels)
-	rb := rec.ReadBuffer(read, 0, 4*pixels)
+	rec.CopyTextureToBuffer(webgpu.TexelCopyTextureInfo{Texture: tgt}, read,
+		webgpu.TexelCopyBufferLayout{BytesPerRow: pitch, RowsPerImage: renderSize},
+		webgpu.Extent3D{Width: renderSize, Height: renderSize})
+	rb := rec.ReadBuffer(read, 0, pitch*renderSize)
 	before := s.Submits()
 	_, err = rec.Submit()
 	must(err)
@@ -158,7 +142,7 @@ func render(s *batchsink.Sink) {
 	bad := 0
 	for i := 0; i < pixels; i++ {
 		x, y := i%renderSize, i/renderSize
-		v := uint32(got[4*i]) | uint32(got[4*i+1])<<8 | uint32(got[4*i+2])<<16 | uint32(got[4*i+3])<<24
+		v := uint32(got[y*pitch+x])
 		if v != wantPixel(x, y) {
 			if bad < 5 {
 				fmt.Printf("pixel (%d,%d): %d, want %d\n", x, y, v, wantPixel(x, y))
@@ -170,7 +154,7 @@ func render(s *batchsink.Sink) {
 		fmt.Printf("%d of %d pixels differ\n", bad, pixels)
 		os.Exit(1)
 	}
-	fmt.Printf("render: %dx%d r8uint drawn with DrawIndexed from a WriteTexture source, %d pixels match the CPU, %d host crossing(s)\n",
+	fmt.Printf("render: %dx%d r8uint drawn with DrawIndexed from a WriteTexture source and read back with CopyTextureToBuffer, %d pixels match the CPU, %d host crossing(s)\n",
 		renderSize, renderSize, pixels, s.Submits()-before)
 }
 

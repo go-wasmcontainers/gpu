@@ -122,6 +122,11 @@ type Limits struct {
 	// invocations (workgroup counts times the device's largest workgroup;
 	// wire.CheckInvocations). 0: DefaultLimits'.
 	MaxDispatchInvocations, MaxStreamInvocations uint64
+	// MaxDrawVertices and MaxStreamVertices are the draw quota of one
+	// context: no Draw or DrawIndexed, and no stream, may ask for more vertex
+	// invocations (index or vertex count times instance count;
+	// wire.CheckDraws). They do not depend on the frame size. 0: DefaultLimits'.
+	MaxDrawVertices, MaxStreamVertices uint64
 	// Memory is the GPU memory quota when the container made no grant
 	// (default 256 MiB). MaxMemory is the largest grant honoured (1.5 GiB).
 	Memory, MaxMemory int64
@@ -131,6 +136,12 @@ type Limits struct {
 var DefaultLimits = Limits{
 	Contexts: 4, MaxFrame: 32 << 20, MaxObjects: 4096, MaxRead: 1 << 20, GPUTime: 2 * time.Second, Budget: 500 * time.Millisecond, DrainTime: 30 * time.Second,
 	MaxDispatchInvocations: 1 << 26, MaxStreamInvocations: 1 << 30,
+	// Draws: a Quake e1m1 frame (go-quake1/engine, 640x480 or any size, the
+	// count is of vertices, not pixels) is a few thousand faces of at most
+	// 186 indices each, about 60 thousand indices a frame, and an alias model
+	// draws a few thousand indices per instance; 1 Mi per draw and 16 Mi per
+	// stream leave more than two orders of magnitude of headroom.
+	MaxDrawVertices: 1 << 20, MaxStreamVertices: 1 << 24,
 	Memory: 256 << 20, MaxMemory: 1610612736,
 }
 
@@ -250,6 +261,12 @@ func (m *Module) limits() Limits {
 	}
 	if l.MaxStreamInvocations == 0 {
 		l.MaxStreamInvocations = d.MaxStreamInvocations
+	}
+	if l.MaxDrawVertices == 0 {
+		l.MaxDrawVertices = d.MaxDrawVertices
+	}
+	if l.MaxStreamVertices == 0 {
+		l.MaxStreamVertices = d.MaxStreamVertices
 	}
 	if l.Memory <= 0 {
 		l.Memory = d.Memory
@@ -467,7 +484,8 @@ func (in *instance) contextCreate(out uint32, m wasi.Memory) wasi.Result {
 		_, dl := d.Caps()
 		be := d.Backend()
 		c := &gctx{be: be, c: batch.New(be, batch.Config{MaxObjects: in.lim.MaxObjects, MaxRead: in.lim.MaxRead, MaxWorkgroups: dl.MaxComputeWorkgroupsPerDimension,
-			WorkgroupInvocations: dl.MaxComputeInvocationsPerWorkgroup, MaxDispatchInvocations: in.lim.MaxDispatchInvocations, MaxStreamInvocations: in.lim.MaxStreamInvocations})}
+			WorkgroupInvocations: dl.MaxComputeInvocationsPerWorkgroup, MaxDispatchInvocations: in.lim.MaxDispatchInvocations, MaxStreamInvocations: in.lim.MaxStreamInvocations,
+			MaxDrawVertices: in.lim.MaxDrawVertices, MaxStreamVertices: in.lim.MaxStreamVertices})}
 		in.mu.Lock()
 		defer in.mu.Unlock()
 		if in.closed || len(in.ctxs) >= in.lim.Contexts {

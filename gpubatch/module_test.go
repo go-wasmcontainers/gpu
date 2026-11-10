@@ -606,6 +606,13 @@ func TestLimitsDefaultsAndHostModules(t *testing.T) {
 	if l.MaxRead != wire.MaxReadWindow {
 		t.Errorf("MaxRead %d above the wire's window", l.MaxRead)
 	}
+	// The draw quota (go-gfx/webgpu#30, G3) has defaults, and a set value is kept.
+	if l.MaxDrawVertices != 1<<20 || l.MaxStreamVertices != 1<<24 {
+		t.Errorf("draw quota %d / %d", l.MaxDrawVertices, l.MaxStreamVertices)
+	}
+	if l = (&Module{Limits: Limits{MaxDrawVertices: 5, MaxStreamVertices: 7}}).limits(); l.MaxDrawVertices != 5 || l.MaxStreamVertices != 7 {
+		t.Errorf("a set draw quota became %d / %d", l.MaxDrawVertices, l.MaxStreamVertices)
+	}
 	hm := HostModules(nil)
 	if len(hm) != 1 || hm[0].Module() != "wasi_webgpu_batch" || len(hm[0].Funcs()) != 5 {
 		t.Errorf("%v", hm)
