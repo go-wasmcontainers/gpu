@@ -149,13 +149,23 @@ in **one submit**:
 1. a `WriteTexture` of a 4×4 `r8uint` source;
 2. a render pass that draws an indexed quad, with vertex and index buffers,
    `DrawIndexed` and explicit layouts, into a 64×64 `r8uint` target;
-3. a compute pass that copies the target into a storage buffer with
-   `textureLoad`, because the stream has no texture-to-buffer copy yet;
+3. `CopyTextureToBuffer` of the target into a MAP_READ buffer (rows padded to
+   256 bytes; from go-gfx/webgpu v0.17.0, stream version 5);
 4. a read-back of that buffer.
 
+The fragment shader has a constant-bound loop of at most 64 iterations with a
+`break` (go-gfx/webgpu v0.16.0, `batch.MaxRenderLoop`): a render module is
+accepted only in that shape, anything else is *unbounded* and is not run
+(verified: with the bound raised to 1000 the case fails with errno 15). Draws are
+counted against a **draw quota** (go-gfx/webgpu v0.18.0, `wire.CheckDraws`):
+`Limits.MaxDrawVertices` 1 Mi per draw and `MaxStreamVertices` 16 Mi per stream by
+default, vertex invocations (index count times instance count), independent of
+the frame size. A Quake e1m1 frame is a few thousand faces of at most 186
+indices (about 60 thousand indices) plus a few thousand per alias instance, so
+640×480 or any size has more than two orders of magnitude of headroom.
+
 All 4096 pixels equal the CPU's: each is `src[x%4, y%4] + x/4`, so a
-transposed axis or a shifted row would show. With the expected value broken on
-purpose, the case fails on 3840 of 4096 pixels. This is the first step of
+transposed axis or a shifted row would show. This is the first step of
 running go-quake1/engine's `gpuworld` inside a container (Quake level 2).
 `TestBatchRender` passes in Chromium and Firefox. go-webengine cannot draw
 yet: its `GPUDevice` has no `createTexture` (go-webengine/engine#415), so that

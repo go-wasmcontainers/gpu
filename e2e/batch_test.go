@@ -328,7 +328,7 @@ func TestBatchRender(t *testing.T) {
 	requireGPU(t, rep)
 	r := rep.Results[0]
 	t.Logf("%s (%.0f ms): exit %d\n%s%s", r.Name, r.Ms, r.Exit, r.Stdout, r.Stderr)
-	want := "render: 64x64 r8uint drawn with DrawIndexed from a WriteTexture source, 4096 pixels match the CPU, 1 host crossing(s)"
+	want := "render: 64x64 r8uint drawn with DrawIndexed from a WriteTexture source and read back with CopyTextureToBuffer, 4096 pixels match the CPU, 1 host crossing(s)"
 	if r.Exit != 0 || !strings.Contains(r.Stdout, want) {
 		t.Errorf("exit %d (%s), stdout %q", r.Exit, r.Error, r.Stdout)
 	}
