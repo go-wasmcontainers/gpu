@@ -202,7 +202,10 @@ jobs:
   # pinned in e2e/webengine/go.mod, a module of its own). Its navigator.gpu
   # (M5) is Metal, so the job runs on macOS. Blocking since v0.45.9: the
   # probe, every batch test, and the ONNX cases pass. TestBatchFallbackRefused
-  # skips: the engine has no software adapter to refuse.
+  # skips: the engine has no software adapter to refuse. TestBatchRender is
+  # skipped here only: the engine's GPUDevice has no createTexture or render
+  # pipelines yet (go-webengine/engine#415, measured on v0.45.9); remove the
+  # -skip when that lands.
   webgpu-webengine:
     name: go-webengine e2e
     runs-on: macos-latest
@@ -217,7 +220,7 @@ jobs:
           GPU_E2E_BROWSER: webengine
         run: |
           status=0
-          go test -tags e2e -count=1 -v -timeout 15m -run 'TestBrowserCapabilities|TestBatch|TestWebGPUBackend' ./e2e/ > "$RUNNER_TEMP/e2e.log" 2>&1 || status=$?
+          go test -tags e2e -count=1 -v -timeout 15m -run 'TestBrowserCapabilities|TestBatch|TestWebGPUBackend' -skip '^TestBatchRender$' ./e2e/ > "$RUNNER_TEMP/e2e.log" 2>&1 || status=$?
           cat "$RUNNER_TEMP/e2e.log"
           exit $status
 

@@ -317,6 +317,23 @@ var deadlineMs = regexp.MustCompile(`long submit: .* after (\d+) ms`)
 // TestBatchComputeQuota: a dispatch of 65535 x 16 workgroups, which the
 // host's compute quota (2^26 invocations per dispatch) refuses, never reaches
 // the GPU: the container gets Refused, not Timeout, and nobody is sanctioned.
+// TestBatchRender: the batch stream draws, not only computes (Quake level 2's
+// route): a WriteTexture source, an indexed quad into an r8uint target with
+// explicit layouts, read back through a compute pass; every pixel checked.
+// A page of its own: added to TestBatchComputeContainers' page, it pushed the
+// go-webengine lane past its 4 GiB heap ceiling (4.6 GB, render cancelled).
+func TestBatchRender(t *testing.T) {
+	rep := runBatchCases(t, []engineCase{{Name: "batch-render", Module: "batchcompute.wasm", Args: []string{"render"}, GPU: true}},
+		launchFallbackArgs(), pageQuery(0, 0))
+	requireGPU(t, rep)
+	r := rep.Results[0]
+	t.Logf("%s (%.0f ms): exit %d\n%s%s", r.Name, r.Ms, r.Exit, r.Stdout, r.Stderr)
+	want := "render: 64x64 r8uint drawn with DrawIndexed from a WriteTexture source, 4096 pixels match the CPU, 1 host crossing(s)"
+	if r.Exit != 0 || !strings.Contains(r.Stdout, want) {
+		t.Errorf("exit %d (%s), stdout %q", r.Exit, r.Error, r.Stdout)
+	}
+}
+
 func TestBatchComputeQuota(t *testing.T) {
 	rep := runBatchCasesSanctions(t, []engineCase{{Name: "wide", Module: "hang.wasm", Args: []string{"3000", "wide"}, GPU: true}},
 		launchFallbackArgs(), pageQuery(0, 0), 0)

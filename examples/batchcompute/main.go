@@ -23,6 +23,10 @@
 //	           group 3 in WGSL, a 4-group layout, a SetBindGroup of 3) and errno 15 (a
 //	           loop beside every storage buffer the device allows, a loop in a module
 //	           with a vertex entry, an auto layout); a bounded loop is the control
+//	render     draws through the stream: WriteTexture a 4x4 r8uint source, an
+//	           indexed quad (vertex and index buffers, DrawIndexed, explicit
+//	           layouts) into a 64x64 r8uint target, read back by a compute
+//	           pass; every pixel checked against the CPU; one submit
 //	quota      allocates 64 MiB buffers through the remote device until
 //	           the guest-side quota refuses
 //	bench N    N interleaved rounds of the per-submit round trip at 4 KiB
@@ -90,6 +94,8 @@ func main() {
 		shaders()
 	case "unbounded":
 		unbounded()
+	case "render":
+		render(s)
 	case "bench":
 		rounds := 30
 		if len(os.Args) > 2 {
