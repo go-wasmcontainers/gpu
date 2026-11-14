@@ -122,7 +122,12 @@ The page draws a frame, closes the bitmap and answers
 back to the worker). At most `MaxFramesInFlight` = 2 frames go
 unacknowledged; then `present` waits for an acknowledgement at most
 `AckWait` = 1 s, so a page that stops answering slows the guest to a frame per
-second and never blocks it. `present` is paced to `FrameInterval` (1/60 s).
+second and never blocks it. `present` is paced to `FrameInterval` (1/60 s) against absolute deadlines
+(`webgpu/pacer.go`): the next deadline is the previous one plus the interval, so
+a timer that wakes late (2.7 ms in Chromium) shortens the next sleep instead of
+stretching the frame, and the mean interval is the interval. A frame that
+misses a whole interval skips to the next slot ahead, with no burst of catch-up
+frames.
 Surface ids are unique within the engine worker; the `open` event names the
 container, so the dashboard can put the pane under it. A backend learns the
 container through `webgpu.Process{GPU, Container}`.

@@ -237,7 +237,9 @@ uniforms, clear, vertices)`. [`examples/triangle`](examples/triangle) draws
 a spinning triangle; `e2e/engine_test.go` runs it as a container on an Apple
 Metal adapter and checks, at the page, 60 frames in order, the clear colour
 in a corner, the triangle in the middle, frames that change, and a rate
-within the 60 per second pacing (one run: 51 frames per second); with
+within the 60 per second pacing (a mean interval of 1/60 s within 0.5 ms; one
+run: 60.3 frames per second, 51.9 before the pacer scheduled against absolute
+deadlines); with
 `input`, the page clicks and types on the pane and the guest prints what it
 read (`pointer-down 10,20`, `key-down key-a "A" shift=true`).
 The same checks, pixels included, pass on the Linux SwiftShader lane.
