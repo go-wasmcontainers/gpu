@@ -133,7 +133,7 @@ type surfaceObj struct {
 	id     uint32
 	canvas js.Value
 	surf   *wg.Surface
-	last   time.Time
+	pace   pacer // spaces the frames FrameInterval apart (pacer.go)
 	emit   func(SurfaceEvent)
 	input  inputHub
 

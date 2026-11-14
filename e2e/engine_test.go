@@ -381,6 +381,12 @@ func checkSurfaces(t *testing.T, p playwright.Page) {
 	if fps > 66 {
 		t.Errorf("%.1f frames per second: pacing to 60 not enforced", fps)
 	}
+	// The pacer schedules against absolute deadlines: the mean interval is the
+	// FrameInterval (1/60 s), within 0.5 ms, not 2.7 ms above it (the late
+	// wake-ups of the browser's timer, which used to add up).
+	if iv := (last.T - first.T) / 59; iv < 1000.0/60-0.5 || iv > 1000.0/60+0.5 {
+		t.Errorf("mean frame interval %.2f ms at the page, want %.2f ms +- 0.5", iv, 1000.0/60)
+	}
 	// Every lane checks pixels. (Fully transparent frames mean the browser
 	// could not back a WebGPU canvas: on headless Linux it needs Skia on
 	// Vulkan, docs/DESIGN.md "Surfaces".)

@@ -304,9 +304,10 @@ func (s *session) render(name string, a []any) (any, error, bool) {
 // frame is moved out with transferToImageBitmap here.
 func (s *session) present(c *contextObj) error {
 	sf := c.sf
-	if wait := s.b.FrameInterval - time.Since(sf.last); wait > 0 {
-		time.Sleep(wait)
+	if sf.pace.now == nil {
+		sf.pace = pacer{interval: s.b.FrameInterval, now: time.Now, sleep: time.Sleep}
 	}
+	sf.pace.wait()
 	if sf.emit != nil {
 		sf.mu.Lock()
 		for sf.seq-sf.acked >= MaxFramesInFlight {
@@ -324,12 +325,10 @@ func (s *session) present(c *contextObj) error {
 		sf.seq++
 		seq := sf.seq
 		sf.mu.Unlock()
-		sf.last = time.Now()
 		bm := sf.canvas.Call("transferToImageBitmap")
 		sf.emit(SurfaceEvent{Op: "frame", Surface: sf.id, Seq: seq, Width: sf.canvas.Get("width").Int(), Height: sf.canvas.Get("height").Int(), Bitmap: bm})
 		return nil
 	}
-	sf.last = time.Now()
 	sf.canvas.Call("transferToImageBitmap").Call("close")
 	return nil
 }
