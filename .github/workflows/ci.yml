@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
-        with: { go-version: '1.27.3' }
+        with: { go-version: '1.27.4' }
       # Say which toolchain ran: a number measured under an unrecorded
       # compiler cannot be attributed.
       - run: go version
@@ -76,7 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
-        with: { go-version: '1.27.3' }
+        with: { go-version: '1.27.4' }
       - run: go version
       - run: go test -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime 45s ${{ matrix.pkg }}
 
@@ -86,7 +86,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
-        with: { go-version: '1.27.3' }
+        with: { go-version: '1.27.4' }
       - run: go version
       # No pipefail on purpose: govulncheck's exit status does not say
       # whether a finding is reachable; vulngate judges the JSON, and an
@@ -113,7 +113,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
-        with: { go-version: '1.27.3' }
+        with: { go-version: '1.27.4' }
       - run: go version
       - run: GOOS=${{ matrix.goos }} GOARCH=wasm CGO_ENABLED=0 go build ./...
       - run: GOOS=${{ matrix.goos }} GOARCH=wasm CGO_ENABLED=0 go vet ./...
@@ -140,7 +140,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
-        with: { go-version: '1.27.3' }
+        with: { go-version: '1.27.4' }
       - uses: actions/setup-node@v7
         with: { node-version: 22 }
       - run: go version && node --version
@@ -186,7 +186,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
-        with: { go-version: '1.27.3' }
+        with: { go-version: '1.27.4' }
       - run: /Applications/Firefox.app/Contents/MacOS/firefox --version
       - name: go test -tags e2e (Firefox)
         shell: bash
@@ -213,7 +213,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
-        with: { go-version: '1.27.3' }
+        with: { go-version: '1.27.4' }
       - name: go test -tags e2e (go-webengine)
         shell: bash
         env:
@@ -245,6 +245,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
-        with: { go-version: '1.27.3' }
+        with: { go-version: '1.27.4' }
       - run: go version
       - run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build ./...
