@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -336,6 +337,57 @@ func TestContainersOnWebGPU(t *testing.T) {
 	checkSurfaces(t, p)
 }
 
+// checkPacing checks the spacing of the frames the pacer emitted, on the
+// worker's clock at the emit (the page's receive time carries its own
+// queueing: on #70's ubuntu lane the page's first frames were handled late and
+// then in a burst, 15.92 ms over 59 intervals where the worker emitted every
+// 16.6; gpu#71). The first 10 frames are start-up (pipeline, first draw: one
+// interval of 68 to 72 ms) and are left out. The MEDIAN interval of the rest:
+//   - at least 1000/60 - 1.0 ms everywhere (a lower bound: a pacer that lets
+//     frames out faster than 60 per second);
+//   - at most 1000/60 + 1.0 ms where GPU_E2E_PACING_TIGHT=1 (the ubuntu lane
+//     and a quiet machine). The ubuntu lane's per-frame spread is 15.8 to 17.5 ms
+//     with a median of 16.6; the pre-#70 pacer sat at 16.67 plus the timer's late
+//     wake-up (2.7 ms measured in Chromium on macOS). The macOS CI runner emits a
+//     frame every 9 to 52 ms whatever the pacer does (median about 19, a shared
+//     virtual machine), so it cannot hold an upper bound.
+//
+// pacer_test.go asserts the schedule on a fake clock everywhere.
+func checkPacing(t *testing.T, frames []struct {
+	Surface int     `json:"surface"`
+	Seq     int     `json:"seq"`
+	T       float64 `json:"t"`
+	Recv    float64 `json:"recv"`
+	Emit    float64 `json:"emit"`
+	W, H    int
+	Center  []int  `json:"center"`
+	Corner  []int  `json:"corner"`
+	Sum     uint32 `json:"sum"`
+}) {
+	t.Helper()
+	var iv []float64
+	for i := 11; i < len(frames); i++ {
+		iv = append(iv, frames[i].Emit-frames[i-1].Emit)
+	}
+	if len(iv) < 20 {
+		t.Fatalf("%d intervals to check, want at least 20", len(iv))
+	}
+	sorted := slices.Clone(iv)
+	slices.Sort(sorted)
+	med, mean := sorted[len(sorted)/2], 0.0
+	for _, v := range iv {
+		mean += v / float64(len(iv))
+	}
+	t.Logf("frame intervals at the emit, after the first 10: median %.2f ms, mean %.2f, min %.1f, max %.1f (interval %.2f)", med, mean, sorted[0], sorted[len(sorted)-1], 1000.0/60)
+	const interval, tol = 1000.0 / 60, 1.0
+	if med < interval-tol {
+		t.Errorf("median frame interval %.2f ms, want at least %.2f: the pacer lets frames out faster than 60 per second", med, interval-tol)
+	}
+	if os.Getenv("GPU_E2E_PACING_TIGHT") == "1" && med > interval+tol {
+		t.Errorf("median frame interval %.2f ms, want at most %.2f: the pacer stretches the frame (gpu#69)", med, interval+tol)
+	}
+}
+
 // checkSurfaces checks what the page (playing the dashboard) received:
 // two surfaces (triangle, then triangle-input), each opened and closed and
 // named after its container; for the first, 60 frames in order, the
@@ -392,22 +444,7 @@ func checkSurfaces(t *testing.T, p playwright.Page) {
 	// The bound is asserted with GPU_E2E_PACING_STRICT=1 (a quiet machine; a CI
 	// runner's page timestamps carry 15.9 to 19.6 ms); pacer_test.go asserts it on
 	// a fake clock everywhere.
-	if iv := (last.T - first.T) / 59; os.Getenv("GPU_E2E_PACING_STRICT") == "1" && (iv < 1000.0/60-0.5 || iv > 1000.0/60+0.5) {
-		t.Errorf("mean frame interval %.2f ms at the page, want %.2f ms +- 0.5", iv, 1000.0/60)
-	} else {
-		t.Logf("mean frame interval %.2f ms at the page", iv)
-	}
-	// TEMP-LOG (gpu#71): per-frame intervals, three clocks.
-	var lt, lr, le []string
-	for i := 1; i < len(s.Frames); i++ {
-		a, b := s.Frames[i-1], s.Frames[i]
-		lt = append(lt, fmt.Sprintf("%.1f", b.T-a.T))
-		lr = append(lr, fmt.Sprintf("%.1f", b.Recv-a.Recv))
-		le = append(le, fmt.Sprintf("%.1f", b.Emit-a.Emit))
-	}
-	t.Logf("PACING page-after-work T: %s", strings.Join(lt, " "))
-	t.Logf("PACING page-on-receipt:   %s", strings.Join(lr, " "))
-	t.Logf("PACING worker-at-emit:    %s", strings.Join(le, " "))
+	checkPacing(t, s.Frames)
 	// Every lane checks pixels. (Fully transparent frames mean the browser
 	// could not back a WebGPU canvas: on headless Linux it needs Skia on
 	// Vulkan, docs/DESIGN.md "Surfaces".)
