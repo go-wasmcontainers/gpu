@@ -345,10 +345,11 @@ func TestContainersOnWebGPU(t *testing.T) {
 // interval of 68 to 72 ms) and are left out. The MEDIAN interval of the rest:
 //   - at least 1000/60 - 1.0 ms everywhere (a lower bound: a pacer that lets
 //     frames out faster than 60 per second);
-//   - at most 1000/60 + 1.0 ms where GPU_E2E_PACING_TIGHT=1 (the ubuntu lane
+//   - at most 1000/60 + 0.4 ms where GPU_E2E_PACING_TIGHT=1 (the ubuntu lane
 //     and a quiet machine). The ubuntu lane's per-frame spread is 15.8 to 17.5 ms
-//     with a median of 16.6; the pre-#70 pacer sat at 16.67 plus the timer's late
-//     wake-up (2.7 ms measured in Chromium on macOS). The macOS CI runner emits a
+//     with a median of 16.65; with the pre-#70 scheduling (next = now + interval)
+//     it is 16.8 to 22.3 with a median of 17.43 (the headless Linux timer wakes
+//     0.8 ms late; Chromium on macOS, 2.7 ms). The macOS CI runner emits a
 //     frame every 9 to 52 ms whatever the pacer does (median about 19, a shared
 //     virtual machine), so it cannot hold an upper bound.
 //
@@ -379,12 +380,12 @@ func checkPacing(t *testing.T, frames []struct {
 		mean += v / float64(len(iv))
 	}
 	t.Logf("frame intervals at the emit, after the first 10: median %.2f ms, mean %.2f, min %.1f, max %.1f (interval %.2f)", med, mean, sorted[0], sorted[len(sorted)-1], 1000.0/60)
-	const interval, tol = 1000.0 / 60, 1.0
-	if med < interval-tol {
-		t.Errorf("median frame interval %.2f ms, want at least %.2f: the pacer lets frames out faster than 60 per second", med, interval-tol)
+	const interval, lowTol, highTol = 1000.0 / 60, 1.0, 0.4
+	if med < interval-lowTol {
+		t.Errorf("median frame interval %.2f ms, want at least %.2f: the pacer lets frames out faster than 60 per second", med, interval-lowTol)
 	}
-	if os.Getenv("GPU_E2E_PACING_TIGHT") == "1" && med > interval+tol {
-		t.Errorf("median frame interval %.2f ms, want at most %.2f: the pacer stretches the frame (gpu#69)", med, interval+tol)
+	if os.Getenv("GPU_E2E_PACING_TIGHT") == "1" && med > interval+highTol {
+		t.Errorf("median frame interval %.2f ms, want at most %.2f: the pacer stretches the frame (gpu#69)", med, interval+highTol)
 	}
 }
 
