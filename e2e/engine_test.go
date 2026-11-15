@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -100,16 +101,19 @@ w.onmessage = (e) => {
   if (d && d.fail) { if (window.__report === undefined) window.__report = JSON.stringify({error: d.fail}); return; }
   if (d.t === "surface") { window.__surfaces.events.push({op: d.op, surface: d.surface, container: d.container, width: d.width, height: d.height}); return; }
   if (d.t === "frame") {
+    const recv = performance.now(); // before the page's own work on the frame
+    // Acknowledged on receipt, before the page reads the frame's pixels (slow on
+    // a CI runner): the pacer must not wait on the test page's own work.
+    w.postMessage({t: "frame-ack", surface: d.surface, seq: d.seq});
     const g = ctx2d();
     g.drawImage(d.bitmap, 0, 0);
     const px = (x, y) => Array.from(g.getImageData(x, y, 1, 1).data);
     const all = g.getImageData(0, 0, d.width, d.height).data;
     let sum = 0;
     for (let i = 0; i < all.length; i += 7) sum = (sum + all[i] * (i % 251)) >>> 0;
-    window.__surfaces.frames.push({surface: d.surface, seq: d.seq, t: performance.now(), w: d.width, h: d.height,
+    window.__surfaces.frames.push({surface: d.surface, seq: d.seq, t: performance.now(), recv, emit: d.emit, w: d.width, h: d.height,
       center: px(d.width >> 1, d.height >> 1), corner: px(2, 2), sum});
     d.bitmap.close();
-    w.postMessage({t: "frame-ack", surface: d.surface, seq: d.seq});
     // A click and a key on the pane, as the dashboard forwards them.
     if (d.seq === 5) {
       w.postMessage({t: "input", surface: d.surface, kind: "pointer-down", x: 10, y: 20});
@@ -138,6 +142,8 @@ type surfaceLog struct {
 		Surface int     `json:"surface"`
 		Seq     int     `json:"seq"`
 		T       float64 `json:"t"`
+		Recv    float64 `json:"recv"`
+		Emit    float64 `json:"emit"`
 		W, H    int
 		Center  []int  `json:"center"`
 		Corner  []int  `json:"corner"`
@@ -331,6 +337,61 @@ func TestContainersOnWebGPU(t *testing.T) {
 	checkSurfaces(t, p)
 }
 
+// checkPacing checks the spacing of the frames the pacer emitted, on the
+// worker's clock at the emit (the page's receive time carries its own
+// queueing: on #70's ubuntu lane the page's first frames were handled late and
+// then in a burst, 15.92 ms over 59 intervals where the worker emitted every
+// 16.6; gpu#71). The first 10 frames are start-up (pipeline, first draw: one
+// interval of 68 to 72 ms) and are left out. Of the rest:
+//   - the MEAN at least 1000/60 - 1.0 ms everywhere (the median of the macOS
+//     runner's bursts was 16.0 on one run, so the median cannot hold a lower
+//     bound there; over 50 intervals a schedule of absolute deadlines cannot
+//     beat the interval by more than one interval / 50 = 0.33 ms; a lower bound: a pacer that lets
+//     frames out faster than 60 per second);
+//   - the MEDIAN at most 1000/60 + 0.4 ms where GPU_E2E_PACING_TIGHT=1 (the ubuntu lane
+//     and a quiet machine). The ubuntu lane's per-frame spread is 15.8 to 17.5 ms
+//     with a median of 16.65; with the pre-#70 scheduling (next = now + interval)
+//     it is 16.8 to 22.3 with a median of 17.43 (the headless Linux timer wakes
+//     0.8 ms late; Chromium on macOS, 2.7 ms). The macOS CI runner emits a
+//     frame every 9 to 52 ms whatever the pacer does (median about 19, a shared
+//     virtual machine), so it cannot hold an upper bound.
+//
+// pacer_test.go asserts the schedule on a fake clock everywhere.
+func checkPacing(t *testing.T, frames []struct {
+	Surface int     `json:"surface"`
+	Seq     int     `json:"seq"`
+	T       float64 `json:"t"`
+	Recv    float64 `json:"recv"`
+	Emit    float64 `json:"emit"`
+	W, H    int
+	Center  []int  `json:"center"`
+	Corner  []int  `json:"corner"`
+	Sum     uint32 `json:"sum"`
+}) {
+	t.Helper()
+	var iv []float64
+	for i := 11; i < len(frames); i++ {
+		iv = append(iv, frames[i].Emit-frames[i-1].Emit)
+	}
+	if len(iv) < 20 {
+		t.Fatalf("%d intervals to check, want at least 20", len(iv))
+	}
+	sorted := slices.Clone(iv)
+	slices.Sort(sorted)
+	med, mean := sorted[len(sorted)/2], 0.0
+	for _, v := range iv {
+		mean += v / float64(len(iv))
+	}
+	t.Logf("frame intervals at the emit, after the first 10: median %.2f ms, mean %.2f, min %.1f, max %.1f (interval %.2f)", med, mean, sorted[0], sorted[len(sorted)-1], 1000.0/60)
+	const interval, lowTol, highTol = 1000.0 / 60, 1.0, 0.4
+	if mean < interval-lowTol {
+		t.Errorf("mean frame interval %.2f ms, want at least %.2f: the pacer lets frames out faster than 60 per second", mean, interval-lowTol)
+	}
+	if os.Getenv("GPU_E2E_PACING_TIGHT") == "1" && med > interval+highTol {
+		t.Errorf("median frame interval %.2f ms, want at most %.2f: the pacer stretches the frame (gpu#69)", med, interval+highTol)
+	}
+}
+
 // checkSurfaces checks what the page (playing the dashboard) received:
 // two surfaces (triangle, then triangle-input), each opened and closed and
 // named after its container; for the first, 60 frames in order, the
@@ -387,11 +448,7 @@ func checkSurfaces(t *testing.T, p playwright.Page) {
 	// The bound is asserted with GPU_E2E_PACING_STRICT=1 (a quiet machine; a CI
 	// runner's page timestamps carry 15.9 to 19.6 ms); pacer_test.go asserts it on
 	// a fake clock everywhere.
-	if iv := (last.T - first.T) / 59; os.Getenv("GPU_E2E_PACING_STRICT") == "1" && (iv < 1000.0/60-0.5 || iv > 1000.0/60+0.5) {
-		t.Errorf("mean frame interval %.2f ms at the page, want %.2f ms +- 0.5", iv, 1000.0/60)
-	} else {
-		t.Logf("mean frame interval %.2f ms at the page", iv)
-	}
+	checkPacing(t, s.Frames)
 	// Every lane checks pixels. (Fully transparent frames mean the browser
 	// could not back a WebGPU canvas: on headless Linux it needs Skia on
 	// Vulkan, docs/DESIGN.md "Surfaces".)

@@ -130,13 +130,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { lane: 'macos-latest, GPU', os: macos-latest, fallback: '0', args: '' }
+          - { lane: 'macos-latest, GPU', os: macos-latest, fallback: '0', tight: '0', args: '' }
           # Headless Linux Chromium can back a WebGPU canvas only with Skia on
           # Vulkan (ExternalVkImageBacking; the headless Ozone platform has no
           # native pixmaps): without these flags the WebGPU instance is torn
           # down at the first canvas configure and every frame is blank.
           # Found with `gpuprobe --canvas --try`; see docs/DESIGN.md.
-          - { lane: 'ubuntu, SwiftShader fallback', os: ubuntu-latest, fallback: '1', args: '--enable-features=Vulkan --use-vulkan=swiftshader --use-angle=swiftshader' }
+          - { lane: 'ubuntu, SwiftShader fallback', os: ubuntu-latest, fallback: '1', tight: '1', args: '--enable-features=Vulkan --use-vulkan=swiftshader --use-angle=swiftshader' }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -169,6 +169,9 @@ jobs:
         env:
           GPU_E2E_ALLOW_FALLBACK: ${{ matrix.fallback }}
           GPU_E2E_ARGS: ${{ matrix.args }}
+          # The upper bound on the pacer's frame interval (e2e/engine_test.go
+          # checkPacing): the macOS runner is too noisy to hold it.
+          GPU_E2E_PACING_TIGHT: ${{ matrix.tight }}
         run: |
           # bash -e would exit at a failing go test before the log is shown.
           status=0

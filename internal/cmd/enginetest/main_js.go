@@ -175,6 +175,9 @@ func main() {
 		}
 		m.Set("t", "frame")
 		m.Set("seq", float64(ev.Seq))
+		// The worker's clock at the emit, which the pacer spaces: the page's
+		// receive time also carries its own queueing (e2e pacing check).
+		m.Set("emit", js.Global().Get("performance").Call("now"))
 		m.Set("bitmap", ev.Bitmap)
 		js.Global().Call("postMessage", m, []any{ev.Bitmap})
 	}
