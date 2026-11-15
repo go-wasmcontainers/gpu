@@ -29,7 +29,7 @@ func (p *pacer) wait() {
 		p.sleep(d)
 		now = p.now()
 	}
-	p.next = now.Add(p.interval)
+	p.next = p.next.Add(p.interval)
 	if !p.next.After(now) {
 		// Missed by a whole interval: the next slot ahead of now.
 		p.next = p.next.Add((now.Sub(p.next)/p.interval + 1) * p.interval)
