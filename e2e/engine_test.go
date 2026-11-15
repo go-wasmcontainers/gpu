@@ -100,13 +100,14 @@ w.onmessage = (e) => {
   if (d && d.fail) { if (window.__report === undefined) window.__report = JSON.stringify({error: d.fail}); return; }
   if (d.t === "surface") { window.__surfaces.events.push({op: d.op, surface: d.surface, container: d.container, width: d.width, height: d.height}); return; }
   if (d.t === "frame") {
+    const recv = performance.now(); // before the page's own work on the frame
     const g = ctx2d();
     g.drawImage(d.bitmap, 0, 0);
     const px = (x, y) => Array.from(g.getImageData(x, y, 1, 1).data);
     const all = g.getImageData(0, 0, d.width, d.height).data;
     let sum = 0;
     for (let i = 0; i < all.length; i += 7) sum = (sum + all[i] * (i % 251)) >>> 0;
-    window.__surfaces.frames.push({surface: d.surface, seq: d.seq, t: performance.now(), w: d.width, h: d.height,
+    window.__surfaces.frames.push({surface: d.surface, seq: d.seq, t: performance.now(), recv, emit: d.emit, w: d.width, h: d.height,
       center: px(d.width >> 1, d.height >> 1), corner: px(2, 2), sum});
     d.bitmap.close();
     w.postMessage({t: "frame-ack", surface: d.surface, seq: d.seq});
@@ -138,6 +139,8 @@ type surfaceLog struct {
 		Surface int     `json:"surface"`
 		Seq     int     `json:"seq"`
 		T       float64 `json:"t"`
+		Recv    float64 `json:"recv"`
+		Emit    float64 `json:"emit"`
 		W, H    int
 		Center  []int  `json:"center"`
 		Corner  []int  `json:"corner"`
@@ -392,6 +395,17 @@ func checkSurfaces(t *testing.T, p playwright.Page) {
 	} else {
 		t.Logf("mean frame interval %.2f ms at the page", iv)
 	}
+	// TEMP-LOG (gpu#71): per-frame intervals, three clocks.
+	var lt, lr, le []string
+	for i := 1; i < len(s.Frames); i++ {
+		a, b := s.Frames[i-1], s.Frames[i]
+		lt = append(lt, fmt.Sprintf("%.1f", b.T-a.T))
+		lr = append(lr, fmt.Sprintf("%.1f", b.Recv-a.Recv))
+		le = append(le, fmt.Sprintf("%.1f", b.Emit-a.Emit))
+	}
+	t.Logf("PACING page-after-work T: %s", strings.Join(lt, " "))
+	t.Logf("PACING page-on-receipt:   %s", strings.Join(lr, " "))
+	t.Logf("PACING worker-at-emit:    %s", strings.Join(le, " "))
 	// Every lane checks pixels. (Fully transparent frames mean the browser
 	// could not back a WebGPU canvas: on headless Linux it needs Skia on
 	// Vulkan, docs/DESIGN.md "Surfaces".)
