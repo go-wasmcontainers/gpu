@@ -101,6 +101,9 @@ w.onmessage = (e) => {
   if (d.t === "surface") { window.__surfaces.events.push({op: d.op, surface: d.surface, container: d.container, width: d.width, height: d.height}); return; }
   if (d.t === "frame") {
     const recv = performance.now(); // before the page's own work on the frame
+    // Acknowledged on receipt, before the page reads the frame's pixels (slow on
+    // a CI runner): the pacer must not wait on the test page's own work.
+    w.postMessage({t: "frame-ack", surface: d.surface, seq: d.seq});
     const g = ctx2d();
     g.drawImage(d.bitmap, 0, 0);
     const px = (x, y) => Array.from(g.getImageData(x, y, 1, 1).data);
@@ -110,7 +113,6 @@ w.onmessage = (e) => {
     window.__surfaces.frames.push({surface: d.surface, seq: d.seq, t: performance.now(), recv, emit: d.emit, w: d.width, h: d.height,
       center: px(d.width >> 1, d.height >> 1), corner: px(2, 2), sum});
     d.bitmap.close();
-    w.postMessage({t: "frame-ack", surface: d.surface, seq: d.seq});
     // A click and a key on the pane, as the dashboard forwards them.
     if (d.seq === 5) {
       w.postMessage({t: "input", surface: d.surface, kind: "pointer-down", x: 10, y: 20});
