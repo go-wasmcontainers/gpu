@@ -14,12 +14,20 @@ import (
 // wasi-gfx:surface pointer-event or key-event on the guest's streams of
 // that kind.
 type InputEvent struct {
-	// Kind is "pointer-down", "pointer-up", "pointer-move", "key-down" or
-	// "key-up" (the surface methods on-<kind>).
+	// Kind is "pointer-down", "pointer-up", "pointer-move", "pointer-motion",
+	// "button-down", "button-up", "key-down" or "key-up" (the surface
+	// methods on-<kind>).
 	Kind string
-	// X, Y: pointers, in surface pixels from the top-left corner (the page
-	// scales from the pane).
+	// X, Y: pointers and buttons, in surface pixels from the top-left corner
+	// (the page scales from the pane).
 	X, Y float64
+	// DX, DY: pointer-motion, the movement since the previous motion event in
+	// surface pixels (MouseEvent.movementX/Y scaled like X, Y), sent while the
+	// pointer is locked.
+	DX, DY float64
+	// Button: button-down and button-up, MouseEvent.button (0 left, 1
+	// middle, 2 right, 3 back, 4 forward).
+	Button int
 	// Code is KeyboardEvent.code ("KeyA"); an unknown code is a key of
 	// none. Text is the text the key produces (KeyboardEvent.key when it is
 	// one character), "" for none.
@@ -28,7 +36,15 @@ type InputEvent struct {
 }
 
 // InputKinds are the kinds a surface serves.
-var InputKinds = []string{"pointer-up", "pointer-down", "pointer-move", "key-up", "key-down"}
+var InputKinds = []string{"pointer-up", "pointer-down", "pointer-move", "pointer-motion", "button-up", "button-down", "key-up", "key-down"}
+
+// MaxButton bounds a mouse button number (MouseEvent.button is a small
+// integer; five are named).
+const MaxButton = 31
+
+// MaxMotion bounds one motion event's delta, in surface pixels: far more
+// than a screen but finite.
+const MaxMotion = 1 << 16
 
 // MaxKeyText bounds a key event's text, in bytes.
 const MaxKeyText = 64
@@ -59,6 +75,23 @@ func (e InputEvent) value() (any, bool) {
 			}
 		}
 		return []any{e.X, e.Y}, true
+	case "pointer-motion":
+		for _, c := range []float64{e.DX, e.DY} {
+			if math.IsNaN(c) || math.Abs(c) > MaxMotion {
+				return nil, false
+			}
+		}
+		return []any{e.DX, e.DY}, true
+	case "button-down", "button-up":
+		if e.Button < 0 || e.Button > MaxButton {
+			return nil, false
+		}
+		for _, c := range []float64{e.X, e.Y} {
+			if math.IsNaN(c) || math.Abs(c) > MaxCoordinate {
+				return nil, false
+			}
+		}
+		return []any{uint32(e.Button), e.X, e.Y}, true
 	case "key-down", "key-up":
 		if len(e.Text) > MaxKeyText || !utf8.ValidString(e.Text) {
 			return nil, false

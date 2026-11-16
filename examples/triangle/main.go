@@ -77,6 +77,8 @@ func main() {
 	// printed as they arrive (read without blocking, once per frame).
 	var downs *wasigpu.PointerEvents
 	var keys *wasigpu.KeyEvents
+	var motion *wasigpu.MotionEvents
+	var buttons *wasigpu.ButtonEvents
 	if input {
 		if downs, err = s.Pointer(wasigpu.PointerDown); err != nil {
 			fail(err)
@@ -86,6 +88,19 @@ func main() {
 			fail(err)
 		}
 		defer keys.Drop()
+		// Relative motion and mouse buttons need the pointer locked to the
+		// pane, which the page grants on a click.
+		if err := s.RequestPointerLock(true); err != nil {
+			fail(err)
+		}
+		if motion, err = s.Motion(); err != nil {
+			fail(err)
+		}
+		defer motion.Drop()
+		if buttons, err = s.Buttons(wasigpu.ButtonDown); err != nil {
+			fail(err)
+		}
+		defer buttons.Drop()
 	}
 	t0 := time.Now()
 	var b [16]byte
@@ -104,6 +119,20 @@ func main() {
 			}
 			for _, k := range ks {
 				fmt.Printf("key-down %s %q shift=%v\n", k.Key, k.Text, k.Shift)
+			}
+			ms, err := motion.Poll()
+			if err != nil {
+				fail(err)
+			}
+			for _, m := range ms {
+				fmt.Printf("pointer-motion %g,%g\n", m.DX, m.DY)
+			}
+			bs, err := buttons.Poll()
+			if err != nil {
+				fail(err)
+			}
+			for _, b := range bs {
+				fmt.Printf("button-down %d %g,%g\n", b.Button, b.X, b.Y)
 			}
 		}
 		binary.LittleEndian.PutUint32(b[:], math.Float32bits(float32(f)*0.05))

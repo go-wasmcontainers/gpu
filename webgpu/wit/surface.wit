@@ -4,7 +4,9 @@
 // built against the upstream WIT links against it. The upstream repository
 // publishes no license, so its files are not copied. Served: the surface,
 // its size, and its pointer and key input streams; not served yet:
-// on-resize and on-frame.
+// on-resize and on-frame. Added to the surface resource, beyond upstream
+// (a guest built against upstream never calls them): on-pointer-motion,
+// on-button-down, on-button-up and request-pointer-lock.
 package wasi-gfx:surface@0.2.0;
 
 interface surface {
@@ -23,10 +25,33 @@ interface surface {
     on-pointer-move: func() -> stream<pointer-event>;
     on-key-up: func() -> stream<key-event>;
     on-key-down: func() -> stream<key-event>;
+    // Extension (not upstream): relative pointer motion, mouse buttons and
+    // pointer lock. See pointer-motion, button-event and request-pointer-lock.
+    on-pointer-motion: func() -> stream<pointer-motion>;
+    on-button-down: func() -> stream<button-event>;
+    on-button-up: func() -> stream<button-event>;
+    request-pointer-lock: func(wanted: bool);
   }
 
   // Surface pixels, from the top-left corner.
   record pointer-event {
+    x: f64,
+    y: f64,
+  }
+
+  // Extension: movement since the previous motion event, in surface pixels
+  // (positive x to the right, positive y down), sent while the pointer is
+  // locked to the surface's pane (request-pointer-lock).
+  record pointer-motion {
+    dx: f64,
+    dy: f64,
+  }
+
+  // Extension: a mouse button press or release at surface pixel (x, y).
+  // button is MouseEvent.button: 0 primary (left), 1 auxiliary (middle),
+  // 2 secondary (right), 3 back, 4 forward.
+  record button-event {
+    button: u8,
     x: f64,
     y: f64,
   }

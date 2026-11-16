@@ -77,8 +77,9 @@ func (p rawPass) SetBindGroup(i uint32, g *wg.BindGroup, offs ...uint32) error {
 
 // SurfaceEvent is what OnSurface receives.
 type SurfaceEvent struct {
-	Op            string // "open", "resize", "close", "frame"
+	Op            string // "open", "resize", "close", "frame", "capture"
 	Surface       uint32
+	Capture       bool   // capture: the guest wants (true) or no longer wants the pointer locked to the pane
 	Container     string // open: the container's label (its ID), "" if unknown
 	Width, Height int
 	Seq           uint64   // frames: from 1
@@ -137,10 +138,11 @@ type surfaceObj struct {
 	emit   func(SurfaceEvent)
 	input  inputHub
 
-	mu    sync.Mutex
-	seq   uint64
-	acked uint64
-	ackCh chan struct{}
+	mu      sync.Mutex
+	capture bool // the guest asked for the pointer lock
+	seq     uint64
+	acked   uint64
+	ackCh   chan struct{}
 }
 
 // configured counts the surfaces whose WebGPU context is configured, in

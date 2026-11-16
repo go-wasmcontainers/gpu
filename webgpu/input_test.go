@@ -24,6 +24,15 @@ func TestInputValidation(t *testing.T) {
 		{InputEvent{Kind: "key-down", Text: strings.Repeat("x", MaxKeyText+1)}, nil},
 		{InputEvent{Kind: "key-down", Text: "\xff"}, nil},
 		{InputEvent{Kind: "scroll"}, nil},
+		// Relative motion and mouse buttons (extension).
+		{InputEvent{Kind: "pointer-motion", DX: -3, DY: 2.5}, []any{-3.0, 2.5}},
+		{InputEvent{Kind: "pointer-motion", DX: math.NaN()}, nil},
+		{InputEvent{Kind: "pointer-motion", DY: MaxMotion + 1}, nil},
+		{InputEvent{Kind: "button-down", Button: 2, X: 7, Y: 8}, []any{uint32(2), 7.0, 8.0}},
+		{InputEvent{Kind: "button-up", Button: 0}, []any{uint32(0), 0.0, 0.0}},
+		{InputEvent{Kind: "button-up", Button: -1}, nil},
+		{InputEvent{Kind: "button-down", Button: MaxButton + 1}, nil},
+		{InputEvent{Kind: "button-down", X: math.Inf(-1)}, nil},
 	} {
 		v, ok := c.e.value()
 		if c.want == nil {
@@ -102,11 +111,15 @@ func TestInputStreamBound(t *testing.T) {
 
 func TestInputKind(t *testing.T) {
 	for m, want := range map[string]string{
-		"[method]surface.on-pointer-down": "pointer-down",
-		"[method]surface.on-key-up":       "key-up",
-		"[method]surface.on-resize":       "",
-		"[method]surface.width":           "",
-		"[method]context.on-key-up":       "",
+		"[method]surface.on-pointer-down":      "pointer-down",
+		"[method]surface.on-key-up":            "key-up",
+		"[method]surface.on-pointer-motion":    "pointer-motion",
+		"[method]surface.on-button-down":       "button-down",
+		"[method]surface.on-button-up":         "button-up",
+		"[method]surface.request-pointer-lock": "",
+		"[method]surface.on-resize":            "",
+		"[method]surface.width":                "",
+		"[method]context.on-key-up":            "",
 	} {
 		if got := inputKind(m); got != want {
 			t.Errorf("%s: %q, want %q", m, got, want)

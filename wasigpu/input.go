@@ -133,6 +133,131 @@ func (e *events) drop() {
 	builtin(wit.RootModule, wit.WaitableBuiltins[wit.WaitableSetDrop].Name, uint64(e.set))
 }
 
+// Extension kinds (not in upstream wasi-gfx:surface): relative pointer
+// motion while the pointer is locked to the pane, and the mouse buttons.
+const (
+	PointerMotion = "pointer-motion"
+	ButtonDown    = "button-down"
+	ButtonUp      = "button-up"
+)
+
+// MotionEvent is pointer movement in surface pixels since the previous
+// event, positive to the right and down.
+type MotionEvent struct{ DX, DY float64 }
+
+// ButtonEvent is a mouse button press or release at a surface pixel: Button
+// is MouseEvent.button (0 left, 1 middle, 2 right, 3 back, 4 forward).
+type ButtonEvent struct {
+	Button int
+	X, Y   float64
+}
+
+// MotionEvents is a surface's stream of relative pointer motion.
+type MotionEvents struct{ e *events }
+
+// Motion opens the surface's relative-motion stream. The host sends motion
+// while the pointer is locked to the pane: ask for the lock with
+// RequestPointerLock; the page grants it on the next click on the pane and
+// releases it on Escape.
+func (s *Surface) Motion() (*MotionEvents, error) {
+	e, err := s.events(PointerMotion)
+	if err != nil {
+		return nil, err
+	}
+	return &MotionEvents{e}, nil
+}
+
+// Poll returns the events since the last call, oldest first; it never
+// blocks.
+func (m *MotionEvents) Poll() ([]MotionEvent, error) {
+	vs, err := m.e.poll()
+	out := make([]MotionEvent, 0, len(vs))
+	for _, v := range vs {
+		f, ok := v.([]any)
+		if !ok || len(f) != 2 {
+			return out, fmt.Errorf("wasigpu: motion event %T", v)
+		}
+		dx, _ := f[0].(float64)
+		dy, _ := f[1].(float64)
+		out = append(out, MotionEvent{dx, dy})
+	}
+	return out, err
+}
+
+// Closed reports whether the stream ended (its surface is gone).
+func (m *MotionEvents) Closed() bool { return m.e.closed() }
+
+// Drop releases the stream.
+func (m *MotionEvents) Drop() { m.e.drop() }
+
+// ButtonEvents is a surface's stream of one mouse-button kind.
+type ButtonEvents struct{ e *events }
+
+// Buttons opens the surface's mouse-button stream of kind (ButtonDown or
+// ButtonUp).
+func (s *Surface) Buttons(kind string) (*ButtonEvents, error) {
+	if kind != ButtonDown && kind != ButtonUp {
+		return nil, fmt.Errorf("wasigpu: %q is not a button kind", kind)
+	}
+	e, err := s.events(kind)
+	if err != nil {
+		return nil, err
+	}
+	return &ButtonEvents{e}, nil
+}
+
+// Poll returns the events since the last call, oldest first; it never
+// blocks.
+func (b *ButtonEvents) Poll() ([]ButtonEvent, error) {
+	vs, err := b.e.poll()
+	out := make([]ButtonEvent, 0, len(vs))
+	for _, v := range vs {
+		ev, derr := decodeButton(v)
+		if derr != nil {
+			return out, derr
+		}
+		out = append(out, ev)
+	}
+	return out, err
+}
+
+// decodeButton reads a button-event record as the Canonical ABI loads it:
+// the u8 button comes back as a uint64.
+func decodeButton(v any) (ButtonEvent, error) {
+	f, ok := v.([]any)
+	if !ok || len(f) != 3 {
+		return ButtonEvent{}, fmt.Errorf("wasigpu: button event %T", v)
+	}
+	var n int
+	switch b := f[0].(type) {
+	case uint64:
+		n = int(b)
+	case uint32:
+		n = int(b)
+	default:
+		return ButtonEvent{}, fmt.Errorf("wasigpu: button %T", f[0])
+	}
+	x, _ := f[1].(float64)
+	y, _ := f[2].(float64)
+	return ButtonEvent{n, x, y}, nil
+}
+
+// Closed reports whether the stream ended (its surface is gone).
+func (b *ButtonEvents) Closed() bool { return b.e.closed() }
+
+// Drop releases the stream.
+func (b *ButtonEvents) Drop() { b.e.drop() }
+
+// RequestPointerLock tells the host whether the guest wants the pointer
+// locked to the surface's pane (true) or not (false). The page cannot lock
+// the pointer without a user gesture, so it locks on the next click on the
+// pane; Escape releases it (and the guest may ask again). While locked the
+// pane sends relative motion (Motion) instead of absolute moves.
+func (s *Surface) RequestPointerLock(wanted bool) error {
+	_, err := callIn(surfaceModule, "[method]surface.request-pointer-lock", s.sf, wanted)
+	return err
+}
+
 // PointerEvents is a surface's stream of one pointer kind.
 type PointerEvents struct{ e *events }
 
