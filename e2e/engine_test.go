@@ -99,7 +99,7 @@ w.onmessage = (e) => {
   if (typeof d === "string") { window.__report = d; return; }
   if (d && d.log) { console.log("engine worker: " + d.log); return; }
   if (d && d.fail) { if (window.__report === undefined) window.__report = JSON.stringify({error: d.fail}); return; }
-  if (d.t === "surface") { window.__surfaces.events.push({op: d.op, surface: d.surface, container: d.container, width: d.width, height: d.height}); return; }
+  if (d.t === "surface") { window.__surfaces.events.push({op: d.op, surface: d.surface, container: d.container, width: d.width, height: d.height, capture: d.capture}); return; }
   if (d.t === "frame") {
     const recv = performance.now(); // before the page's own work on the frame
     // Acknowledged on receipt, before the page reads the frame's pixels (slow on
@@ -118,6 +118,10 @@ w.onmessage = (e) => {
     if (d.seq === 5) {
       w.postMessage({t: "input", surface: d.surface, kind: "pointer-down", x: 10, y: 20});
       w.postMessage({t: "input", surface: d.surface, kind: "key-down", code: "KeyA", text: "A", shift: true});
+      // The pointer locked to the pane (the guest asked: a "capture" event),
+      // a right button press and a relative motion.
+      w.postMessage({t: "input", surface: d.surface, kind: "button-down", button: 2, x: 30, y: 40});
+      w.postMessage({t: "input", surface: d.surface, kind: "pointer-motion", dx: -7, dy: 3});
     }
   }
 };
@@ -134,6 +138,7 @@ window.__worker = w;
 type surfaceLog struct {
 	Events []struct {
 		Op            string `json:"op"`
+		Capture       bool   `json:"capture"`
 		Surface       int    `json:"surface"`
 		Container     string `json:"container"`
 		Width, Height int
@@ -307,7 +312,7 @@ func TestContainersOnWebGPU(t *testing.T) {
 		"mnist-gpu":        {0, []string{"digit 7 (p=1.000)"}},
 		"mnist-gpu-no-cap": {1, nil},
 		"triangle":         {0, []string{"60 frames in"}},
-		"triangle-input":   {0, []string{"pointer-down 10,20\n", "key-down key-a \"A\" shift=true\n", "40 frames in"}},
+		"triangle-input":   {0, []string{"pointer-down 10,20\n", "key-down key-a \"A\" shift=true\n", "button-down 2 30,40\n", "pointer-motion -7,3\n", "40 frames in"}},
 	}
 	for _, r := range rep.Results {
 		w := want[r.Name]
@@ -410,8 +415,12 @@ func checkSurfaces(t *testing.T, p playwright.Page) {
 	for _, e := range all.Events {
 		ops = append(ops, e.Op)
 	}
-	if strings.Join(ops, ",") != "open,close,open,close" || all.Events[0].Width != 320 || all.Events[0].Height != 240 {
+	if strings.Join(ops, ",") != "open,close,open,capture,close" || all.Events[0].Width != 320 || all.Events[0].Height != 240 {
 		t.Fatalf("surface events %+v", all.Events)
+	}
+	// The second guest asked for the pointer lock ("capture") once.
+	if c := all.Events[3]; !c.Capture || c.Surface != all.Events[2].Surface {
+		t.Errorf("capture event %+v: want the second surface, wanted", c)
 	}
 	// The open event names the container (the engine's wasi.Config.Label,
 	// set from runtime.Spec.ID).

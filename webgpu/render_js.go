@@ -144,6 +144,21 @@ func (s *session) render(name string, a []any) (any, error, bool) {
 			sf.emit(SurfaceEvent{Op: "resize", Surface: sf.id, Width: w, Height: h})
 		}
 		return nil, nil, true
+	case "[method]surface.request-pointer-lock":
+		o, err := s.getObj(a[0], "surface")
+		if err != nil {
+			return nil, err, true
+		}
+		sf := o.(*surfaceObj)
+		wanted, _ := a[1].(bool)
+		sf.mu.Lock()
+		changed := sf.capture != wanted
+		sf.capture = wanted
+		sf.mu.Unlock()
+		if changed && sf.emit != nil {
+			sf.emit(SurfaceEvent{Op: "capture", Surface: sf.id, Capture: wanted})
+		}
+		return nil, nil, true
 	case "[constructor]context":
 		o, err := s.getObj(a[0], "surface")
 		if err != nil {

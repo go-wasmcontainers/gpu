@@ -131,6 +131,30 @@ func TestStreamSyncRead(t *testing.T) {
 	}
 }
 
+// The extension streams carry their records through the Canonical ABI: a
+// relative motion is two f64, a button event a u8 and two f64.
+func TestStreamMotionAndButtons(t *testing.T) {
+	r := newRig(t)
+	motion, mend := r.stream(surfaceIface.Types["pointer-motion"])
+	motion.Push([]any{-1.5, 2.0})
+	res := r.call(1, "[stream-read-0][method]surface.on-pointer-motion", mend, 64, 4)
+	if res.Trap != "" || res.Ret != 1<<4|copyCompleted || r.pointerAt(64) != [2]float64{-1.5, 2} {
+		t.Errorf("motion: %+v %v", res, r.pointerAt(64))
+	}
+	button, bend := r.stream(surfaceIface.Types["button-event"])
+	button.Push([]any{uint32(2), 3.0, 4.0})
+	res = r.call(1, "[stream-read-0][method]surface.on-button-down", bend, 128, 4)
+	if res.Trap != "" || res.Ret != 1<<4|copyCompleted {
+		t.Fatalf("button: %+v", res)
+	}
+	if b := r.mem[128]; b != 2 {
+		t.Errorf("button %d, want 2", b)
+	}
+	if x, y := math.Float64frombits(binary.LittleEndian.Uint64(r.mem[136:])), math.Float64frombits(binary.LittleEndian.Uint64(r.mem[144:])); x != 3 || y != 4 {
+		t.Errorf("button at %v,%v, want 3,4", x, y)
+	}
+}
+
 func TestStreamAsyncPollWait(t *testing.T) {
 	r := newRig(t)
 	s, end := r.stream(pointerT)

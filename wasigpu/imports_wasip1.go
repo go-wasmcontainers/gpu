@@ -1212,53 +1212,129 @@ func imp299(p0 uint32) uint32
 //go:noescape
 func imp300(p0 uint32)
 
-//go:wasmimport wasi-gfx:surface/surface@0.2.0 [resource-drop]surface
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [method]surface.on-pointer-motion
 //go:noescape
-func imp301(p0 uint32)
+func imp301(p0 uint32) uint32
 
-//go:wasmimport wasi-gfx:surface/surface-webgpu@0.2.0 [constructor]context
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-pointer-motion
 //go:noescape
-func imp302(p0 uint32) uint32
+func imp302(p0 uint32, p1 uint32, p2 uint32) uint32
 
-//go:wasmimport wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.configure
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-pointer-motion
 //go:noescape
-func imp303(p0 uint32, p1 uint32, p2 uint32, p3 uint32, p4 uint32, p5 uint32, p6 uint32, p7 uint32, p8 uint32, p9 uint32, p10 uint32, p11 uint32, p12 uint32, p13 uint32, p14 uint32)
+func imp303(p0 uint32, p1 uint32, p2 uint32) uint32
 
-//go:wasmimport wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.unconfigure
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-pointer-motion
 //go:noescape
-func imp304(p0 uint32)
+func imp304(p0 uint32) uint32
 
-//go:wasmimport wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.get-current-texture
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-pointer-motion
 //go:noescape
 func imp305(p0 uint32) uint32
 
-//go:wasmimport wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.present
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-pointer-motion
 //go:noescape
 func imp306(p0 uint32)
 
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [method]surface.on-button-down
+//go:noescape
+func imp307(p0 uint32) uint32
+
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-button-down
+//go:noescape
+func imp308(p0 uint32, p1 uint32, p2 uint32) uint32
+
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-button-down
+//go:noescape
+func imp309(p0 uint32, p1 uint32, p2 uint32) uint32
+
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-button-down
+//go:noescape
+func imp310(p0 uint32) uint32
+
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-button-down
+//go:noescape
+func imp311(p0 uint32) uint32
+
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-button-down
+//go:noescape
+func imp312(p0 uint32)
+
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [method]surface.on-button-up
+//go:noescape
+func imp313(p0 uint32) uint32
+
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-button-up
+//go:noescape
+func imp314(p0 uint32, p1 uint32, p2 uint32) uint32
+
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-button-up
+//go:noescape
+func imp315(p0 uint32, p1 uint32, p2 uint32) uint32
+
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-button-up
+//go:noescape
+func imp316(p0 uint32) uint32
+
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-button-up
+//go:noescape
+func imp317(p0 uint32) uint32
+
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-button-up
+//go:noescape
+func imp318(p0 uint32)
+
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [method]surface.request-pointer-lock
+//go:noescape
+func imp319(p0 uint32, p1 uint32)
+
+//go:wasmimport wasi-gfx:surface/surface@0.2.0 [resource-drop]surface
+//go:noescape
+func imp320(p0 uint32)
+
+//go:wasmimport wasi-gfx:surface/surface-webgpu@0.2.0 [constructor]context
+//go:noescape
+func imp321(p0 uint32) uint32
+
+//go:wasmimport wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.configure
+//go:noescape
+func imp322(p0 uint32, p1 uint32, p2 uint32, p3 uint32, p4 uint32, p5 uint32, p6 uint32, p7 uint32, p8 uint32, p9 uint32, p10 uint32, p11 uint32, p12 uint32, p13 uint32, p14 uint32)
+
+//go:wasmimport wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.unconfigure
+//go:noescape
+func imp323(p0 uint32)
+
+//go:wasmimport wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.get-current-texture
+//go:noescape
+func imp324(p0 uint32) uint32
+
+//go:wasmimport wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.present
+//go:noescape
+func imp325(p0 uint32)
+
 //go:wasmimport wasi-gfx:surface/surface-webgpu@0.2.0 [resource-drop]context
 //go:noescape
-func imp307(p0 uint32)
+func imp326(p0 uint32)
 
 //go:wasmimport $root [waitable-set-new]
 //go:noescape
-func imp308() uint32
+func imp327() uint32
 
 //go:wasmimport $root [waitable-set-drop]
 //go:noescape
-func imp309(p0 uint32)
+func imp328(p0 uint32)
 
 //go:wasmimport $root [waitable-join]
 //go:noescape
-func imp310(p0 uint32, p1 uint32)
+func imp329(p0 uint32, p1 uint32)
 
 //go:wasmimport $root [waitable-set-poll]
 //go:noescape
-func imp311(p0 uint32, p1 uint32) uint32
+func imp330(p0 uint32, p1 uint32) uint32
 
 //go:wasmimport $root [waitable-set-wait]
 //go:noescape
-func imp312(p0 uint32, p1 uint32) uint32
+func imp331(p0 uint32, p1 uint32) uint32
 
 // calls maps "module name" to a call over core values.
 var calls = map[string]func(a []uint64) uint64{
@@ -1654,49 +1730,68 @@ var calls = map[string]func(a []uint64) uint64{
 		imp270(uint32(a[0]), uint32(a[1]), uint32(a[2]), uint32(a[3]), uint32(a[4]))
 		return 0
 	},
-	"wasi-gfx:surface/surface@0.2.0 [method]surface.on-pointer-up":                                      func(a []uint64) uint64 { return uint64(imp271(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-pointer-up":                       func(a []uint64) uint64 { return uint64(imp272(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
-	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-pointer-up":          func(a []uint64) uint64 { return uint64(imp273(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-pointer-up":                func(a []uint64) uint64 { return uint64(imp274(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-pointer-up":   func(a []uint64) uint64 { return uint64(imp275(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-pointer-up":              func(a []uint64) uint64 { imp276(uint32(a[0])); return 0 },
-	"wasi-gfx:surface/surface@0.2.0 [method]surface.on-pointer-down":                                    func(a []uint64) uint64 { return uint64(imp277(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-pointer-down":                     func(a []uint64) uint64 { return uint64(imp278(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
-	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-pointer-down":        func(a []uint64) uint64 { return uint64(imp279(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-pointer-down":              func(a []uint64) uint64 { return uint64(imp280(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-pointer-down": func(a []uint64) uint64 { return uint64(imp281(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-pointer-down":            func(a []uint64) uint64 { imp282(uint32(a[0])); return 0 },
-	"wasi-gfx:surface/surface@0.2.0 [method]surface.on-pointer-move":                                    func(a []uint64) uint64 { return uint64(imp283(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-pointer-move":                     func(a []uint64) uint64 { return uint64(imp284(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
-	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-pointer-move":        func(a []uint64) uint64 { return uint64(imp285(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-pointer-move":              func(a []uint64) uint64 { return uint64(imp286(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-pointer-move": func(a []uint64) uint64 { return uint64(imp287(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-pointer-move":            func(a []uint64) uint64 { imp288(uint32(a[0])); return 0 },
-	"wasi-gfx:surface/surface@0.2.0 [method]surface.on-key-up":                                          func(a []uint64) uint64 { return uint64(imp289(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-key-up":                           func(a []uint64) uint64 { return uint64(imp290(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
-	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-key-up":              func(a []uint64) uint64 { return uint64(imp291(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-key-up":                    func(a []uint64) uint64 { return uint64(imp292(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-key-up":       func(a []uint64) uint64 { return uint64(imp293(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-key-up":                  func(a []uint64) uint64 { imp294(uint32(a[0])); return 0 },
-	"wasi-gfx:surface/surface@0.2.0 [method]surface.on-key-down":                                        func(a []uint64) uint64 { return uint64(imp295(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-key-down":                         func(a []uint64) uint64 { return uint64(imp296(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
-	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-key-down":            func(a []uint64) uint64 { return uint64(imp297(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-key-down":                  func(a []uint64) uint64 { return uint64(imp298(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-key-down":     func(a []uint64) uint64 { return uint64(imp299(uint32(a[0]))) },
-	"wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-key-down":                func(a []uint64) uint64 { imp300(uint32(a[0])); return 0 },
-	"wasi-gfx:surface/surface@0.2.0 [resource-drop]surface":                                             func(a []uint64) uint64 { imp301(uint32(a[0])); return 0 },
-	"wasi-gfx:surface/surface-webgpu@0.2.0 [constructor]context":                                        func(a []uint64) uint64 { return uint64(imp302(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [method]surface.on-pointer-up":                                        func(a []uint64) uint64 { return uint64(imp271(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-pointer-up":                         func(a []uint64) uint64 { return uint64(imp272(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-pointer-up":            func(a []uint64) uint64 { return uint64(imp273(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-pointer-up":                  func(a []uint64) uint64 { return uint64(imp274(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-pointer-up":     func(a []uint64) uint64 { return uint64(imp275(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-pointer-up":                func(a []uint64) uint64 { imp276(uint32(a[0])); return 0 },
+	"wasi-gfx:surface/surface@0.2.0 [method]surface.on-pointer-down":                                      func(a []uint64) uint64 { return uint64(imp277(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-pointer-down":                       func(a []uint64) uint64 { return uint64(imp278(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-pointer-down":          func(a []uint64) uint64 { return uint64(imp279(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-pointer-down":                func(a []uint64) uint64 { return uint64(imp280(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-pointer-down":   func(a []uint64) uint64 { return uint64(imp281(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-pointer-down":              func(a []uint64) uint64 { imp282(uint32(a[0])); return 0 },
+	"wasi-gfx:surface/surface@0.2.0 [method]surface.on-pointer-move":                                      func(a []uint64) uint64 { return uint64(imp283(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-pointer-move":                       func(a []uint64) uint64 { return uint64(imp284(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-pointer-move":          func(a []uint64) uint64 { return uint64(imp285(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-pointer-move":                func(a []uint64) uint64 { return uint64(imp286(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-pointer-move":   func(a []uint64) uint64 { return uint64(imp287(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-pointer-move":              func(a []uint64) uint64 { imp288(uint32(a[0])); return 0 },
+	"wasi-gfx:surface/surface@0.2.0 [method]surface.on-key-up":                                            func(a []uint64) uint64 { return uint64(imp289(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-key-up":                             func(a []uint64) uint64 { return uint64(imp290(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-key-up":                func(a []uint64) uint64 { return uint64(imp291(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-key-up":                      func(a []uint64) uint64 { return uint64(imp292(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-key-up":         func(a []uint64) uint64 { return uint64(imp293(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-key-up":                    func(a []uint64) uint64 { imp294(uint32(a[0])); return 0 },
+	"wasi-gfx:surface/surface@0.2.0 [method]surface.on-key-down":                                          func(a []uint64) uint64 { return uint64(imp295(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-key-down":                           func(a []uint64) uint64 { return uint64(imp296(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-key-down":              func(a []uint64) uint64 { return uint64(imp297(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-key-down":                    func(a []uint64) uint64 { return uint64(imp298(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-key-down":       func(a []uint64) uint64 { return uint64(imp299(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-key-down":                  func(a []uint64) uint64 { imp300(uint32(a[0])); return 0 },
+	"wasi-gfx:surface/surface@0.2.0 [method]surface.on-pointer-motion":                                    func(a []uint64) uint64 { return uint64(imp301(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-pointer-motion":                     func(a []uint64) uint64 { return uint64(imp302(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-pointer-motion":        func(a []uint64) uint64 { return uint64(imp303(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-pointer-motion":              func(a []uint64) uint64 { return uint64(imp304(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-pointer-motion": func(a []uint64) uint64 { return uint64(imp305(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-pointer-motion":            func(a []uint64) uint64 { imp306(uint32(a[0])); return 0 },
+	"wasi-gfx:surface/surface@0.2.0 [method]surface.on-button-down":                                       func(a []uint64) uint64 { return uint64(imp307(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-button-down":                        func(a []uint64) uint64 { return uint64(imp308(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-button-down":           func(a []uint64) uint64 { return uint64(imp309(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-button-down":                 func(a []uint64) uint64 { return uint64(imp310(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-button-down":    func(a []uint64) uint64 { return uint64(imp311(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-button-down":               func(a []uint64) uint64 { imp312(uint32(a[0])); return 0 },
+	"wasi-gfx:surface/surface@0.2.0 [method]surface.on-button-up":                                         func(a []uint64) uint64 { return uint64(imp313(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-read-0][method]surface.on-button-up":                          func(a []uint64) uint64 { return uint64(imp314(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-read-0][method]surface.on-button-up":             func(a []uint64) uint64 { return uint64(imp315(uint32(a[0]), uint32(a[1]), uint32(a[2]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-cancel-read-0][method]surface.on-button-up":                   func(a []uint64) uint64 { return uint64(imp316(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [async-lower][stream-cancel-read-0][method]surface.on-button-up":      func(a []uint64) uint64 { return uint64(imp317(uint32(a[0]))) },
+	"wasi-gfx:surface/surface@0.2.0 [stream-drop-readable-0][method]surface.on-button-up":                 func(a []uint64) uint64 { imp318(uint32(a[0])); return 0 },
+	"wasi-gfx:surface/surface@0.2.0 [method]surface.request-pointer-lock":                                 func(a []uint64) uint64 { imp319(uint32(a[0]), uint32(a[1])); return 0 },
+	"wasi-gfx:surface/surface@0.2.0 [resource-drop]surface":                                               func(a []uint64) uint64 { imp320(uint32(a[0])); return 0 },
+	"wasi-gfx:surface/surface-webgpu@0.2.0 [constructor]context":                                          func(a []uint64) uint64 { return uint64(imp321(uint32(a[0]))) },
 	"wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.configure": func(a []uint64) uint64 {
-		imp303(uint32(a[0]), uint32(a[1]), uint32(a[2]), uint32(a[3]), uint32(a[4]), uint32(a[5]), uint32(a[6]), uint32(a[7]), uint32(a[8]), uint32(a[9]), uint32(a[10]), uint32(a[11]), uint32(a[12]), uint32(a[13]), uint32(a[14]))
+		imp322(uint32(a[0]), uint32(a[1]), uint32(a[2]), uint32(a[3]), uint32(a[4]), uint32(a[5]), uint32(a[6]), uint32(a[7]), uint32(a[8]), uint32(a[9]), uint32(a[10]), uint32(a[11]), uint32(a[12]), uint32(a[13]), uint32(a[14]))
 		return 0
 	},
-	"wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.unconfigure":         func(a []uint64) uint64 { imp304(uint32(a[0])); return 0 },
-	"wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.get-current-texture": func(a []uint64) uint64 { return uint64(imp305(uint32(a[0]))) },
-	"wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.present":             func(a []uint64) uint64 { imp306(uint32(a[0])); return 0 },
-	"wasi-gfx:surface/surface-webgpu@0.2.0 [resource-drop]context":              func(a []uint64) uint64 { imp307(uint32(a[0])); return 0 },
-	"$root [waitable-set-new]":  func(a []uint64) uint64 { return uint64(imp308()) },
-	"$root [waitable-set-drop]": func(a []uint64) uint64 { imp309(uint32(a[0])); return 0 },
-	"$root [waitable-join]":     func(a []uint64) uint64 { imp310(uint32(a[0]), uint32(a[1])); return 0 },
-	"$root [waitable-set-poll]": func(a []uint64) uint64 { return uint64(imp311(uint32(a[0]), uint32(a[1]))) },
-	"$root [waitable-set-wait]": func(a []uint64) uint64 { return uint64(imp312(uint32(a[0]), uint32(a[1]))) },
+	"wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.unconfigure":         func(a []uint64) uint64 { imp323(uint32(a[0])); return 0 },
+	"wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.get-current-texture": func(a []uint64) uint64 { return uint64(imp324(uint32(a[0]))) },
+	"wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.present":             func(a []uint64) uint64 { imp325(uint32(a[0])); return 0 },
+	"wasi-gfx:surface/surface-webgpu@0.2.0 [resource-drop]context":              func(a []uint64) uint64 { imp326(uint32(a[0])); return 0 },
+	"$root [waitable-set-new]":  func(a []uint64) uint64 { return uint64(imp327()) },
+	"$root [waitable-set-drop]": func(a []uint64) uint64 { imp328(uint32(a[0])); return 0 },
+	"$root [waitable-join]":     func(a []uint64) uint64 { imp329(uint32(a[0]), uint32(a[1])); return 0 },
+	"$root [waitable-set-poll]": func(a []uint64) uint64 { return uint64(imp330(uint32(a[0]), uint32(a[1]))) },
+	"$root [waitable-set-wait]": func(a []uint64) uint64 { return uint64(imp331(uint32(a[0]), uint32(a[1]))) },
 }

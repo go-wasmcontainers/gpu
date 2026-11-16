@@ -169,6 +169,7 @@ func main() {
 		m.Set("container", ev.Container)
 		m.Set("width", ev.Width)
 		m.Set("height", ev.Height)
+		m.Set("capture", ev.Capture)
 		if ev.Op != "frame" {
 			js.Global().Call("postMessage", m)
 			return
@@ -205,7 +206,8 @@ func main() {
 				return 0
 			}
 			webgpu.SurfaceInput(uint32(num("surface")), webgpu.InputEvent{
-				Kind: str("kind"), X: num("x"), Y: num("y"), Code: str("code"), Text: str("text"),
+				Kind: str("kind"), X: num("x"), Y: num("y"), DX: num("dx"), DY: num("dy"), Button: int(num("button")),
+				Code: str("code"), Text: str("text"),
 				Alt: d.Get("alt").Truthy(), Ctrl: d.Get("ctrl").Truthy(), Meta: d.Get("meta").Truthy(), Shift: d.Get("shift").Truthy(),
 			})
 		}

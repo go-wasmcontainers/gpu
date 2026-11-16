@@ -147,6 +147,18 @@ engine test, an `input` message):
 | `text` | — | the text the key produces (`KeyboardEvent.key` when it is one character), "" for none; at most 64 bytes of UTF-8 |
 | `alt`, `ctrl`, `meta`, `shift` | — | the modifiers |
 
+Mouse buttons and relative motion (an extension beyond upstream's
+`surface` resource): `kind` `button-down` / `button-up` with `button`
+(`MouseEvent.button`, 0 to 31) and `x`, `y`; `kind` `pointer-motion` with
+`dx`, `dy` (`MouseEvent.movementX/Y` scaled like `x`, `y`; finite, at most 2¹⁶
+in magnitude), sent while the pointer is locked. The guest asks for the lock
+with `request-pointer-lock(wanted)`; the host emits
+`SurfaceEvent{Op: "capture", Surface, Capture: wanted}`. The pane calls
+`requestPointerLock()` on its next click (a user gesture is required), sends
+`pointer-motion` while `document.pointerLockElement` is its canvas, and the
+browser releases the lock on Escape (the pane then sends absolute moves
+again; the guest's wish stays until it asks `false`).
+
 Invalid events are dropped. Only the surface's own pane should send events
 for it (focus: keys go to the pane that has it). Pointer moves can be
 coalesced by the page (at most one per frame is useful); a stream keeps 256

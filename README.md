@@ -231,6 +231,23 @@ streams, coordinates must be finite and key text at most 64 bytes of
 UTF-8. Guest side: `(*Surface).Pointer(kind)` and `(*Surface).Keys(kind)`,
 whose `Poll` returns what arrived without blocking (once per frame).
 
+**Mouse buttons, relative motion and pointer lock** (an extension of the
+surface resource, not in upstream wasi-gfx; a guest built against upstream
+never calls it). `on-button-down` and `on-button-up` return
+`stream<button-event>` (`MouseEvent.button`: 0 left, 1 middle, 2 right, at
+the surface pixel); `on-pointer-motion` returns `stream<pointer-motion>`
+(`dx`, `dy` in surface pixels, positive right and down), which the page sends
+while the pointer is locked to the pane; `request-pointer-lock(wanted)` tells
+the host whether the guest wants the lock. The host reports a change as a
+`SurfaceEvent{Op: "capture", Capture: wanted}`; the page locks the pointer on
+its next click on the pane (a browser needs a user gesture) and the browser
+releases it on Escape. The page sends `InputEvent{Kind: "button-down" |
+"button-up" | "pointer-motion", Button, DX, DY}` (`MaxMotion` and `MaxButton`
+bound them). Guest side: `(*Surface).Buttons(kind)`, `(*Surface).Motion()` and
+`(*Surface).RequestPointerLock(wanted)`; with `input`,
+`examples/triangle` also prints `button-down 2 30,40` and
+`pointer-motion -7,3`.
+
 Guest side: `(*wasigpu.Device).Surface(w, h)`,
 `(*Surface).RenderPipeline(wgsl, vs, fs)` and `(*Surface).Frame(pipeline,
 uniforms, clear, vertices)`. [`examples/triangle`](examples/triangle) draws
