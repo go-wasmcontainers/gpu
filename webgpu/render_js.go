@@ -196,6 +196,7 @@ func (s *session) render(name string, a []any) (any, error, bool) {
 			return nil, trap("configure", err), true
 		}
 		sf.setSurface(surf)
+		sf.dev, sf.desc = dev, desc
 		return nil, nil, true
 	case "[method]context.unconfigure":
 		o, err := s.getObj(a[0], "context")
@@ -214,6 +215,16 @@ func (s *session) render(name string, a []any) (any, error, bool) {
 			return nil, Trapf("get-current-texture: the context is not configured"), true
 		}
 		t, err := sf.surf.CurrentTexture()
+		if unconfigured(err) && sf.dev != nil {
+			// Firefox, after a present: configure again, once.
+			sf.setSurface(nil)
+			surf, cerr := sf.dev.NewSurfaceFromCanvas(sf.canvas, sf.desc)
+			if cerr != nil {
+				return nil, trap("get-current-texture (configure again)", cerr), true
+			}
+			sf.setSurface(surf)
+			t, err = sf.surf.CurrentTexture()
+		}
 		if err != nil {
 			return nil, trap("get-current-texture", err), true
 		}
