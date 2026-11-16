@@ -134,9 +134,13 @@ type surfaceObj struct {
 	id     uint32
 	canvas js.Value
 	surf   *wg.Surface
-	pace   pacer // spaces the frames FrameInterval apart (pacer.go)
-	emit   func(SurfaceEvent)
-	input  inputHub
+	// dev and desc are what surf was configured with, to configure it again
+	// when the browser has dropped the configuration (see currentTexture).
+	dev   *wg.Device
+	desc  wg.SurfaceDescriptor
+	pace  pacer // spaces the frames FrameInterval apart (pacer.go)
+	emit  func(SurfaceEvent)
+	input inputHub
 
 	mu      sync.Mutex
 	capture bool // the guest asked for the pointer lock
