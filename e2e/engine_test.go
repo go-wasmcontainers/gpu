@@ -96,7 +96,12 @@ const ctx2d = () => g2 || (g2 = document.getElementById("c").getContext("2d", {w
 window.__surfaces = {events: [], frames: []};
 w.onmessage = (e) => {
   const d = e.data;
-  if (typeof d === "string") { window.__report = d; return; }
+  // The surfaces the page saw travel in the report too, for the lanes that read
+  // only the report (Firefox: TestSurfaceFrames).
+  if (typeof d === "string") {
+    try { const r = JSON.parse(d); r.surfaces = window.__surfaces; window.__report = JSON.stringify(r); } catch (_) { window.__report = d; }
+    return;
+  }
   if (d && d.log) { console.log("engine worker: " + d.log); return; }
   if (d && d.fail) { if (window.__report === undefined) window.__report = JSON.stringify({error: d.fail}); return; }
   if (d.t === "surface") { window.__surfaces.events.push({op: d.op, surface: d.surface, container: d.container, width: d.width, height: d.height, capture: d.capture}); return; }
