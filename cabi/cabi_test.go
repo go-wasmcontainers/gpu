@@ -3,31 +3,31 @@ package cabi
 import "testing"
 
 // A frame-sized argument allocated on every host call used to cost one
-// 250 KiB block per call: Release now keeps the blocks and Alloc reuses them.
-func TestReleasedBlocksAreReused(t *testing.T) {
+// 250 KiB block per call: Release now keeps argument blocks and AllocArg reuses them.
+func TestReleasedArgBlocksAreReused(t *testing.T) {
 	const frame = 256000
 	Release()
 	free = nil
-	Alloc(4, frame) // the first call allocates
+	AllocArg(4, frame) // the first call allocates
 	Release()
 	if n := testing.AllocsPerRun(100, func() {
-		Alloc(4, frame)
-		Alloc(8, 64)
+		AllocArg(4, frame)
+		AllocArg(8, 64)
 		Release()
 	}); n > 1 { // the small block is allowed to miss once, never the frame
-		t.Errorf("Alloc and Release of a frame allocate %.0f times per call, want 0 (1 at most)", n)
+		t.Errorf("AllocArg and Release of a frame allocate %.0f times per call, want 0 (1 at most)", n)
 	}
 }
 
 func TestReusedBlockIsZeroed(t *testing.T) {
 	free = nil
-	Alloc(4, 1024)
-	for i := range pinned[0] {
-		pinned[0][i] = 0xFF
+	AllocArg(4, 1024)
+	for i := range pinnedArg[0] {
+		pinnedArg[0][i] = 0xFF
 	}
 	Release()
-	Alloc(4, 1000)
-	for i, v := range pinned[0] {
+	AllocArg(4, 1000)
+	for i, v := range pinnedArg[0] {
 		if v != 0 {
 			t.Fatalf("byte %d of a reused block is %#x, want 0", i, v)
 		}
@@ -35,10 +35,30 @@ func TestReusedBlockIsZeroed(t *testing.T) {
 	Release()
 }
 
+// Values lifted from a result block alias it (Memory.Read does not copy) and
+// outlive Release, so result blocks must never be handed out again.
+func TestResultBlocksAreNotReused(t *testing.T) {
+	free = nil
+	Alloc(4, 64)
+	result := pinned[0]
+	for i := range result {
+		result[i] = 0xAB
+	}
+	Release()
+	AllocArg(4, 64)
+	Alloc(4, 64)
+	Release()
+	for i, v := range result {
+		if v != 0xAB {
+			t.Fatalf("byte %d of a released result block was overwritten (%#x): a caller still holds it", i, v)
+		}
+	}
+}
+
 func TestFreeListIsBounded(t *testing.T) {
 	free = nil
 	for range 20 {
-		Alloc(4, 1<<20)
+		AllocArg(4, 1<<20)
 	}
 	Release()
 	total := 0
