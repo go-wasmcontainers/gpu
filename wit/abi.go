@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -81,21 +82,36 @@ func flagsSize(n int) uint32 {
 	return 4
 }
 
+// caseCache holds the despecialized cases of enum, option and result types,
+// built once per type: Size, Align, Load and Store ask on every host call, and
+// an enum such as gpu-texture-format (101 labels) used to cost a 2.4 KiB slice
+// each time (go-wasmcontainers/playground#56). Types are not modified after
+// they are parsed.
+var caseCache sync.Map // *Type -> []Case
+
 // cases are a type's variant cases after despecialization.
 func cases(t *Type) []Case {
 	switch t.Kind {
 	case Variant:
 		return t.Cases
-	case Enum:
-		c := make([]Case, len(t.Labels))
-		for i, l := range t.Labels {
-			c[i] = Case{Name: l}
+	case Enum, Option, Result:
+		if c, ok := caseCache.Load(t); ok {
+			return c.([]Case)
 		}
+		var c []Case
+		switch t.Kind {
+		case Enum:
+			c = make([]Case, len(t.Labels))
+			for i, l := range t.Labels {
+				c[i] = Case{Name: l}
+			}
+		case Option:
+			c = []Case{{Name: "none"}, {Name: "some", Type: t.Elem}}
+		default:
+			c = []Case{{Name: "ok", Type: t.Elem}, {Name: "error", Type: t.Err}}
+		}
+		caseCache.Store(t, c)
 		return c
-	case Option:
-		return []Case{{Name: "none"}, {Name: "some", Type: t.Elem}}
-	case Result:
-		return []Case{{Name: "ok", Type: t.Elem}, {Name: "error", Type: t.Err}}
 	}
 	return nil
 }
