@@ -293,3 +293,22 @@ func TestInvalidShaderMessage(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// TestDestroyFromAnotherGoroutine: go-gfx/webgpu destroys the host object of a
+// collected handle from the runtime's cleanup goroutine, while the program
+// creates objects and submits; under -race the sink must be ordered.
+func TestDestroyFromAnotherGoroutine(t *testing.T) {
+	s, _ := newSink(t)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			_ = s.Destroy(uint32(1000 + i))
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		_ = s.Create(uint32(1+i), wire.KindBuffer, nil)
+		_ = s.Flush()
+	}
+	<-done
+}

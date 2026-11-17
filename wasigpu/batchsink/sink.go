@@ -26,6 +26,7 @@ package batchsink
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/go-gfx/webgpu"
 	"github.com/go-gfx/webgpu/wire"
@@ -125,6 +126,10 @@ func (s *Sink) fail(op string, e Errno) *Error {
 
 // Sink is a webgpu.ReadSink on one host context.
 type Sink struct {
+	// mu orders the methods: go-gfx/webgpu sends Destroy for a handle that was
+	// garbage collected from the runtime's cleanup goroutine, concurrently with
+	// the program's own Create and Submit.
+	mu   sync.Mutex
 	h    Host
 	ctx  uint32
 	caps wgpubatch.Caps
@@ -230,6 +235,8 @@ func (s *Sink) lose(err error) error {
 // Create implements webgpu.RemoteSink: the creation travels with the next
 // Submit (or Flush).
 func (s *Sink) Create(id uint32, kind wire.Kind, desc []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	sz := wgpubatch.MessageHeaderSize + 12 + pad4(len(desc))
 	if err := s.room(sz); err != nil {
 		return err
@@ -241,6 +248,8 @@ func (s *Sink) Create(id uint32, kind wire.Kind, desc []byte) error {
 
 // Destroy implements webgpu.RemoteSink: it travels with the next Submit.
 func (s *Sink) Destroy(id uint32) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	sz := uint64(wgpubatch.MessageHeaderSize + 4)
 	if err := s.room(sz); err != nil {
 		return err
@@ -257,6 +266,8 @@ func (s *Sink) Submit(words []uint32, data []byte) error { return s.SubmitRead(w
 // SubmitRead implements webgpu.ReadSink: Submit, then the stream's
 // ReadBuffer commands have filled window (at most MaxRead bytes).
 func (s *Sink) SubmitRead(words []uint32, data []byte, window []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if len(window) > MaxRead {
 		return fmt.Errorf("batchsink: a %d-byte read window above the host's %d", len(window), MaxRead)
 	}
@@ -270,12 +281,18 @@ func (s *Sink) SubmitRead(words []uint32, data []byte, window []byte) error {
 }
 
 // Flush sends pending creations and destructions without a stream.
-func (s *Sink) Flush() error { return s.flush(nil) }
+func (s *Sink) Flush() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.flush(nil)
+}
 
 // Raw sends frame as it is, with a read window, bypassing the encoder:
 // for tools and tests that must send a frame the encoder would not build.
 // Pending messages are sent first.
 func (s *Sink) Raw(frame, window []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.flush(nil); err != nil {
 		return err
 	}
@@ -289,6 +306,8 @@ func (s *Sink) Raw(frame, window []byte) error {
 // Close sends what is pending and destroys the host context. The Sink is
 // unusable afterwards.
 func (s *Sink) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.done {
 		return nil
 	}
