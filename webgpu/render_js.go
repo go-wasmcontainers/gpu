@@ -94,7 +94,7 @@ func (s *session) render(name string, a []any) (any, error, bool) {
 		if err != nil {
 			return nil, err, true
 		}
-		sf := &surfaceObj{canvas: js.Global().Get("OffscreenCanvas").New(w, h), emit: s.b.OnSurface, ackCh: make(chan struct{})}
+		sf := &surfaceObj{canvas: js.Global().Get("OffscreenCanvas").New(w, h), emit: s.b.OnSurface, frames: newFrameWindow()}
 		surfaces.Lock()
 		surfaces.n++
 		sf.id = surfaces.n
@@ -236,6 +236,15 @@ func (s *session) render(name string, a []any) (any, error, bool) {
 			return nil, err, true
 		}
 		return nil, s.present(o.(*contextObj)), true
+	case "[method]context.ready-to-present":
+		o, err := s.getObj(a[0], "context")
+		if err != nil {
+			return nil, err, true
+		}
+		sf := o.(*contextObj).sf
+		// A surface nobody watches (no emit) never waits; one the page watches is
+		// ready while fewer than MaxFramesInFlight frames are unacknowledged.
+		return sf.emit == nil || sf.frames.ready(), nil, true
 	case "[method]gpu-texture.create-view":
 		t, err := get[*wg.Texture](s, a[0], "gpu-texture")
 		if err != nil {
@@ -335,22 +344,7 @@ func (s *session) present(c *contextObj) error {
 	}
 	sf.pace.wait()
 	if sf.emit != nil {
-		sf.mu.Lock()
-		for sf.seq-sf.acked >= MaxFramesInFlight {
-			ch := sf.ackCh
-			sf.mu.Unlock()
-			select {
-			case <-ch:
-			case <-time.After(AckWait):
-			}
-			sf.mu.Lock()
-			if sf.seq-sf.acked >= MaxFramesInFlight {
-				sf.acked = sf.seq - MaxFramesInFlight + 1 // give up waiting on this one
-			}
-		}
-		sf.seq++
-		seq := sf.seq
-		sf.mu.Unlock()
+		seq := sf.frames.next(AckWait)
 		bm := sf.canvas.Call("transferToImageBitmap")
 		sf.emit(SurfaceEvent{Op: "frame", Surface: sf.id, Seq: seq, Width: sf.canvas.Get("width").Int(), Height: sf.canvas.Get("height").Int(), Bitmap: bm})
 		return nil

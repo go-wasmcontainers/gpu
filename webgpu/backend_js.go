@@ -86,15 +86,6 @@ type SurfaceEvent struct {
 	Bitmap        js.Value // frames: an ImageBitmap
 }
 
-// MaxFramesInFlight is how many unacknowledged frames a surface may have
-// before present waits (at most AckWait) for AckFrame.
-const MaxFramesInFlight = 2
-
-// AckWait bounds one wait for acknowledgements: a page that stops
-// acknowledging slows a guest down to one frame per AckWait, never stops
-// it.
-const AckWait = time.Second
-
 var surfaces = struct {
 	sync.Mutex
 	n   uint32
@@ -109,13 +100,7 @@ func AckFrame(surface uint32, seq uint64) {
 	if sf == nil {
 		return
 	}
-	sf.mu.Lock()
-	if seq > sf.acked {
-		sf.acked = seq
-		close(sf.ackCh)
-		sf.ackCh = make(chan struct{})
-	}
-	sf.mu.Unlock()
+	sf.frames.ack(seq)
 }
 
 // SurfaceInput delivers a pointer or key event from the page to a
@@ -144,9 +129,7 @@ type surfaceObj struct {
 
 	mu      sync.Mutex
 	capture bool // the guest asked for the pointer lock
-	seq     uint64
-	acked   uint64
-	ackCh   chan struct{}
+	frames  *frameWindow
 }
 
 // configured counts the surfaces whose WebGPU context is configured, in

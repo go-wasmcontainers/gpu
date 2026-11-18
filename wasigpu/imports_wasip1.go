@@ -1312,29 +1312,33 @@ func imp324(p0 uint32) uint32
 //go:noescape
 func imp325(p0 uint32)
 
+//go:wasmimport wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.ready-to-present
+//go:noescape
+func imp326(p0 uint32) uint32
+
 //go:wasmimport wasi-gfx:surface/surface-webgpu@0.2.0 [resource-drop]context
 //go:noescape
-func imp326(p0 uint32)
+func imp327(p0 uint32)
 
 //go:wasmimport $root [waitable-set-new]
 //go:noescape
-func imp327() uint32
+func imp328() uint32
 
 //go:wasmimport $root [waitable-set-drop]
 //go:noescape
-func imp328(p0 uint32)
+func imp329(p0 uint32)
 
 //go:wasmimport $root [waitable-join]
 //go:noescape
-func imp329(p0 uint32, p1 uint32)
+func imp330(p0 uint32, p1 uint32)
 
 //go:wasmimport $root [waitable-set-poll]
 //go:noescape
-func imp330(p0 uint32, p1 uint32) uint32
+func imp331(p0 uint32, p1 uint32) uint32
 
 //go:wasmimport $root [waitable-set-wait]
 //go:noescape
-func imp331(p0 uint32, p1 uint32) uint32
+func imp332(p0 uint32, p1 uint32) uint32
 
 // calls maps "module name" to a call over core values.
 var calls = map[string]func(a []uint64) uint64{
@@ -1788,10 +1792,11 @@ var calls = map[string]func(a []uint64) uint64{
 	"wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.unconfigure":         func(a []uint64) uint64 { imp323(uint32(a[0])); return 0 },
 	"wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.get-current-texture": func(a []uint64) uint64 { return uint64(imp324(uint32(a[0]))) },
 	"wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.present":             func(a []uint64) uint64 { imp325(uint32(a[0])); return 0 },
-	"wasi-gfx:surface/surface-webgpu@0.2.0 [resource-drop]context":              func(a []uint64) uint64 { imp326(uint32(a[0])); return 0 },
-	"$root [waitable-set-new]":  func(a []uint64) uint64 { return uint64(imp327()) },
-	"$root [waitable-set-drop]": func(a []uint64) uint64 { imp328(uint32(a[0])); return 0 },
-	"$root [waitable-join]":     func(a []uint64) uint64 { imp329(uint32(a[0]), uint32(a[1])); return 0 },
-	"$root [waitable-set-poll]": func(a []uint64) uint64 { return uint64(imp330(uint32(a[0]), uint32(a[1]))) },
-	"$root [waitable-set-wait]": func(a []uint64) uint64 { return uint64(imp331(uint32(a[0]), uint32(a[1]))) },
+	"wasi-gfx:surface/surface-webgpu@0.2.0 [method]context.ready-to-present":    func(a []uint64) uint64 { return uint64(imp326(uint32(a[0]))) },
+	"wasi-gfx:surface/surface-webgpu@0.2.0 [resource-drop]context":              func(a []uint64) uint64 { imp327(uint32(a[0])); return 0 },
+	"$root [waitable-set-new]":  func(a []uint64) uint64 { return uint64(imp328()) },
+	"$root [waitable-set-drop]": func(a []uint64) uint64 { imp329(uint32(a[0])); return 0 },
+	"$root [waitable-join]":     func(a []uint64) uint64 { imp330(uint32(a[0]), uint32(a[1])); return 0 },
+	"$root [waitable-set-poll]": func(a []uint64) uint64 { return uint64(imp331(uint32(a[0]), uint32(a[1]))) },
+	"$root [waitable-set-wait]": func(a []uint64) uint64 { return uint64(imp332(uint32(a[0]), uint32(a[1]))) },
 }

@@ -128,6 +128,13 @@ a timer that wakes late (2.7 ms in Chromium) shortens the next sleep instead of
 stretching the frame, and the mean interval is the interval. A frame that
 misses a whole interval skips to the next slot ahead, with no burst of catch-up
 frames.
+`present` blocks the guest while it waits for the page. A guest that has work
+of its own to do in that time (Quake keeps its sound mix filled, WinQuake's
+`S_ExtraUpdate`) asks `context.ready-to-present` (an extension of this host,
+not in wasi-gfx; `wasigpu.Surface.ReadyToPresent`): true when `present` would
+not wait, that is fewer than `MaxFramesInFlight` frames are unacknowledged
+(always true for a surface nobody watches). It polls it in slices and calls
+`present` once it is true; the pacing, the limit and `AckWait` are unchanged.
 Surface ids are unique within the engine worker; the `open` event names the
 container, so the dashboard can put the pane under it. A backend learns the
 container through `webgpu.Process{GPU, Container}`.
