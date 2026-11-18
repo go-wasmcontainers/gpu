@@ -78,6 +78,20 @@ func (p *RenderPipeline) Drop() {
 	drop("gpu-shader-module", p.module)
 }
 
+// ReadyToPresent reports whether Frame would hand its frame to the page without
+// waiting for the page to acknowledge an earlier one (an extension of this
+// host, not in wasi-gfx). A guest with work of its own while it waits (a sound
+// mix to keep filled) polls it in slices and does that work between them,
+// instead of blocking inside Frame.
+func (s *Surface) ReadyToPresent() (bool, error) {
+	v, err := callIn(contextModule, "[method]context.ready-to-present", s.ctx)
+	if err != nil {
+		return false, err
+	}
+	b, _ := v.(bool)
+	return b, nil
+}
+
 // Frame clears the surface to clear (RGBA in [0, 1]), draws vertices with
 // p (buffers bound at group 0, bindings 0.. in order; none for none) and
 // presents the frame. Present is paced by the host (60 per second at

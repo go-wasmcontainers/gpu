@@ -116,5 +116,11 @@ interface surface-webgpu {
     unconfigure: func();
     get-current-texture: func() -> gpu-texture;
     present: func();
+    // Extension (go-wasmcontainers/gpu, not in wasi-gfx): true when present
+    // would hand its frame over without waiting for the page to acknowledge an
+    // earlier one. A guest with work of its own to do while it waits (Quake's
+    // S_ExtraUpdate, which keeps the sound mix filled) polls this in slices
+    // instead of blocking inside present.
+    ready-to-present: func() -> bool;
   }
 }
