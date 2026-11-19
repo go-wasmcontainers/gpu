@@ -13,6 +13,7 @@ package wasigpu
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-wasmcontainers/gpu/cabi"
 	witdata "github.com/go-wasmcontainers/gpu/webgpu/wit"
@@ -27,6 +28,21 @@ const (
 )
 
 var webgpuIface, surfaceIface *wit.Interface
+
+// slowest is the longest host call (name and time) since ResetSlowest: where
+// the time of a frame went when it went to the host. A guest is one goroutine
+// at a time on wasip1, so it needs no lock.
+var slowest struct {
+	name string
+	d    time.Duration
+}
+
+// ResetSlowest starts a new reading of Slowest.
+func ResetSlowest() { slowest.name, slowest.d = "", 0 }
+
+// Slowest returns the longest host call made since ResetSlowest, by its import
+// name ("[method]context.present"), and how long it took.
+func Slowest() (string, time.Duration) { return slowest.name, slowest.d }
 
 // enum is a WIT enum label's index (e.g. enum("gpu-load-op", "clear")).
 func enum(typ, label string) uint32 {
@@ -111,7 +127,11 @@ func callIn(module, name string, args ...any) (any, error) {
 		ret = cabi.Alloc(wit.Align(f.Result), wit.Size(f.Result))
 		flat = append(flat, uint64(ret))
 	}
+	t0 := time.Now()
 	r := c(flat)
+	if d := time.Since(t0); d > slowest.d {
+		slowest.name, slowest.d = name, d
+	}
 	switch {
 	case f.Result == nil:
 		return nil, nil
