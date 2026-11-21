@@ -18,6 +18,7 @@ type asyncHost struct {
 	ended   int
 	window  []byte
 	order   []string
+	beginE  Errno
 	readyE  Errno
 	endE    Errno
 	pending bool
@@ -25,6 +26,9 @@ type asyncHost struct {
 
 func (h *asyncHost) SubmitBegin(ctx uint32, frame, read []byte) Errno {
 	h.order = append(h.order, "begin")
+	if h.beginE != Success {
+		return h.beginE
+	}
 	h.begun++
 	h.left = h.polls
 	h.window = read
@@ -117,6 +121,16 @@ func TestNoIdleIsTheBlockingSubmit(t *testing.T) {
 	}
 }
 
+// The blocking submit's error loses the context on an AsyncHost too.
+func TestNoIdleBlockingErrorOnAnAsyncHost(t *testing.T) {
+	s, h := newAsyncSink(t, 0)
+	h.submitErr = Timeout
+	var e *Error
+	if err := submitOne(t, s, nil); !errors.As(err, &e) || e.Errno != Timeout || s.Err() == nil {
+		t.Fatalf("error %v, lost %v", err, s.Err())
+	}
+}
+
 // A host without the async imports (a plain Host) is the blocking submit even
 // with an idle function.
 func TestIdleOnAPlainHost(t *testing.T) {
@@ -159,6 +173,7 @@ func TestAsyncHostErrorsLoseTheContext(t *testing.T) {
 		name string
 		set  func(*asyncHost)
 	}{
+		{"begin", func(h *asyncHost) { h.beginE = TooLarge }},
 		{"ready", func(h *asyncHost) { h.readyE = ContextLost }},
 		{"end", func(h *asyncHost) { h.endE = Timeout }},
 	} {

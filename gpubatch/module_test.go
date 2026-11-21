@@ -483,6 +483,32 @@ func TestSubmitEndWaitsAndReportsTheErrno(t *testing.T) {
 	if e := g.call(fnSubmitBegin, 99, 4096, uint64(len(f)), 8192, 32); e != InvalidArgument {
 		t.Errorf("submit_begin on no context: %d", e)
 	}
+	if e := g.call(fnSubmitReady, 99, 64); e != InvalidArgument {
+		t.Errorf("submit_ready on no context: %d", e)
+	}
+	if e := g.call(fnSubmitEnd, 99); e != InvalidArgument {
+		t.Errorf("submit_end on no context: %d", e)
+	}
+	// submit_ready stores its answer inside memory or faults.
+	f = bufferFrame(t, 2, 256, webgpu.BufferUsageMapRead|webgpu.BufferUsageCopyDst,
+		[]uint32{uint32(wire.ReadBuffer), 2, 8, 0, 16, 4}, nil)
+	copy(g.m[4096:], f)
+	if e := g.call(fnSubmitBegin, uint64(ctx), 4096, uint64(len(f)), 8192, 32); e != Success {
+		t.Fatalf("submit_begin: %d", e)
+	}
+	if e := g.call(fnSubmitReady, uint64(ctx), uint64(len(g.m)-2)); e != Fault {
+		t.Errorf("submit_ready with out past memory: %d, want Fault", e)
+	}
+	if e := g.call(fnSubmitEnd, uint64(ctx)); e != Success {
+		t.Errorf("submit_end: %d", e)
+	}
+	// A begun frame whose window does not fit memory is refused at the begin.
+	if e := g.call(fnSubmitBegin, uint64(ctx), 4096, uint64(len(f)), uint64(len(g.m)-8), 32); e != Fault {
+		t.Errorf("submit_begin with the window past memory: %d, want Fault", e)
+	}
+	if e := g.call(fnSubmitEnd, uint64(ctx)); e != InvalidArgument {
+		t.Errorf("a refused begin left a frame begun: submit_end %d", e)
+	}
 }
 
 // The frame is copied out of guest memory before it is decoded: a guest
