@@ -163,6 +163,49 @@ type Sink struct {
 	idle   func() error
 	sleep  func(time.Duration)
 	slices int // idle slices spent waiting, all submits
+	// clock is time.Now, replaced by a test; slow is the longest host call of a
+	// submit since ResetSlowest.
+	clock func() time.Time
+	slow  struct {
+		name string
+		d    time.Duration
+	}
+}
+
+// ResetSlowest forgets the longest host call, to start a reading.
+func (s *Sink) ResetSlowest() {
+	s.mu.Lock()
+	s.slow.name, s.slow.d = "", 0
+	s.mu.Unlock()
+}
+
+// Slowest is the longest single host call of a submit (submit, submit_begin,
+// submit_ready or submit_end; the idle function between polls is not part of
+// one) since ResetSlowest, with its time; an empty name is none.
+func (s *Sink) Slowest() (string, time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.slow.name, s.slow.d
+}
+
+// start and note time one host call.
+func (s *Sink) start() time.Time {
+	if s.clock == nil {
+		return time.Now()
+	}
+	return s.clock()
+}
+
+func (s *Sink) note(name string, t0 time.Time) {
+	var d time.Duration
+	if s.clock == nil {
+		d = time.Since(t0)
+	} else {
+		d = s.clock().Sub(t0)
+	}
+	if d > s.slow.d {
+		s.slow.name, s.slow.d = name, d
+	}
 }
 
 // SetIdle sets the work done while a frame waits for the GPU: with a host that
@@ -189,12 +232,18 @@ func (s *Sink) IdleSlices() int {
 func (s *Sink) cross(frame, window []byte) error {
 	ah, ok := s.h.(AsyncHost)
 	if !ok || s.idle == nil {
-		if e := s.h.Submit(s.ctx, frame, window); e != Success {
+		t0 := s.start()
+		e := s.h.Submit(s.ctx, frame, window)
+		s.note("submit", t0)
+		if e != Success {
 			return s.lose(s.fail("submit", e))
 		}
 		return nil
 	}
-	if e := ah.SubmitBegin(s.ctx, frame, window); e != Success {
+	t0 := s.start()
+	e := ah.SubmitBegin(s.ctx, frame, window)
+	s.note("submit_begin", t0)
+	if e != Success {
 		return s.lose(s.fail("submit", e))
 	}
 	sleep := s.sleep
@@ -203,7 +252,9 @@ func (s *Sink) cross(frame, window []byte) error {
 	}
 	var idleErr error
 	for {
+		t0 := s.start()
 		ready, e := ah.SubmitReady(s.ctx)
+		s.note("submit_ready", t0)
 		if e != Success {
 			ah.SubmitEnd(s.ctx) // leave nothing begun
 			return s.lose(s.fail("submit", e))
@@ -217,7 +268,10 @@ func (s *Sink) cross(frame, window []byte) error {
 		s.slices++
 		sleep(IdleSlice)
 	}
-	if e := ah.SubmitEnd(s.ctx); e != Success {
+	t1 := s.start()
+	e = ah.SubmitEnd(s.ctx)
+	s.note("submit_end", t1)
+	if e != Success {
 		return s.lose(s.fail("submit", e))
 	}
 	return idleErr
