@@ -22,6 +22,14 @@
 //	                                            (at most 1 KiB, UTF-8): copied to buf, its
 //	                                            full length stored at out; Success with
 //	                                            length 0 when there is none
+//	submit_begin(ctx, frame, frame_len, read, read_len)
+//	                                            submit without the wait: the frame runs while
+//	                                            the guest does other work (one begun frame per
+//	                                            context; a second begin is InvalidArgument)
+//	submit_ready(ctx, out)                      stores 1 at out (a u32) when the begun frame is
+//	                                            over, 0 when it is not; never waits
+//	submit_end(ctx)                             waits for the begun frame, then returns what
+//	                                            submit would have (the read window filled)
 //
 // A process without the "gpu" capability (run --gpu) gets Denied from
 // every function. The container's GPU memory quota is the capability
@@ -218,6 +226,10 @@ const (
 	fnSubmit
 	fnContextDestroy
 	fnLastError
+	fnSubmitBegin
+	fnSubmitReady
+	fnSubmitEnd
+	fnLast = fnSubmitEnd
 )
 
 // Funcs implements wasi.HostModule: every argument an i32, Errno returned.
@@ -229,6 +241,9 @@ var funcs = []wasi.HostFunc{
 	{Name: "submit", Params: "iiiii", Result: "i"},
 	{Name: "context_destroy", Params: "i", Result: "i"},
 	{Name: "last_error", Params: "iiii", Result: "i"},
+	{Name: "submit_begin", Params: "iiiii", Result: "i"},
+	{Name: "submit_ready", Params: "ii", Result: "i"},
+	{Name: "submit_end", Params: "i", Result: "i"},
 }
 
 func (m *Module) limits() Limits {
@@ -310,7 +325,17 @@ type gctx struct {
 	peak, peakDispatch atomic.Uint64 // batch.Context's peaks after the last frame
 	mu                 sync.Mutex    // held while a frame runs: a batch.Context is not concurrent
 	errMu              sync.Mutex
-	errMsg             string // the last failure's message
+	errMsg             string                  // the last failure's message
+	pend               atomic.Pointer[pending] // the submit_begin not yet ended, or nil
+}
+
+// pending is a frame submit_begin started: the guest runs on while it does, and
+// submit_end waits for it, then copies the read window to the guest.
+type pending struct {
+	done   chan struct{}
+	e      Errno
+	window []byte
+	read   uint32
 }
 
 // release closes the context's backend. If a frame is still running (the
@@ -364,7 +389,7 @@ func later(f func() Errno, then func(e Errno, m wasi.Memory) wasi.Result) wasi.R
 
 // Call implements wasi.Instance.
 func (in *instance) Call(fn int, a []uint64, m wasi.Memory) wasi.Result {
-	if fn < 0 || fn > fnLastError || len(a) != len(funcs[fn].Params) {
+	if fn < 0 || fn > fnLast || len(a) != len(funcs[fn].Params) {
 		return wasi.Result{Trap: ModuleName + ": no such function"}
 	}
 	u := func(i int) uint32 { return uint32(a[i]) }
@@ -390,6 +415,12 @@ func (in *instance) Call(fn int, a []uint64, m wasi.Memory) wasi.Result {
 		return in.submit(u(0), u(1), u(2), u(3), u(4), m)
 	case fnLastError:
 		return in.lastError(u(0), u(1), u(2), u(3), m)
+	case fnSubmitBegin:
+		return in.submitBegin(u(0), u(1), u(2), u(3), u(4), m)
+	case fnSubmitReady:
+		return in.submitReady(u(0), u(1), m)
+	case fnSubmitEnd:
+		return in.submitEnd(u(0))
 	default:
 		return r(in.contextDestroy(u(0)))
 	}
@@ -531,44 +562,116 @@ func (in *instance) contextDestroy(h uint32) Errno {
 // anything reads it; the read window is a host buffer the stream's reads
 // fill, copied to the guest only in Resume, once the stream succeeded.
 func (in *instance) submit(h, frame, flen, read, rlen uint32, m wasi.Memory) wasi.Result {
+	_, p, e := in.start(h, frame, flen, read, rlen, m)
+	if e != Success {
+		return r(e)
+	}
+	return wasi.Result{Wait: p.done, Resume: func(m wasi.Memory) wasi.Result { return p.finish(m) }}
+}
+
+// start checks a submit's arguments, copies the frame out of guest memory and
+// runs the frame on its own goroutine; the pending submit's channel closes
+// when it is over.
+func (in *instance) start(h, frame, flen, read, rlen uint32, m wasi.Memory) (*gctx, *pending, Errno) {
 	in.mu.Lock()
 	c := in.ctxs[h]
 	in.mu.Unlock()
 	switch {
 	case c == nil:
-		return r(InvalidArgument)
+		return nil, nil, InvalidArgument
 	case c.lost.Load():
-		return r(ContextLost)
+		return nil, nil, ContextLost
 	case flen < wgpubatch.FrameHeaderSize || flen > in.lim.MaxFrame || rlen > in.lim.MaxRead:
-		return r(TooLarge)
+		return nil, nil, TooLarge
 	}
 	src, ok := m.Read(frame, flen)
 	if !ok {
-		return r(Fault)
+		return nil, nil, Fault
 	}
 	fr := append([]byte(nil), src...) // copy, then decode
 	if rlen > 0 {
 		if _, ok := m.Read(read, rlen); !ok {
-			return r(Fault)
+			return nil, nil, Fault
 		}
 	}
-	window := make([]byte, rlen)
-
-	done := make(chan struct{})
-	var e Errno
+	p := &pending{done: make(chan struct{}), window: make([]byte, rlen), read: read}
 	go func() {
-		e = in.runSubmit(c, fr, window)
-		close(done)
+		p.e = in.runSubmit(c, fr, p.window)
+		close(p.done)
 	}()
-	return wasi.Result{Wait: done, Resume: func(m wasi.Memory) wasi.Result {
-		if e != Success {
-			return r(e)
-		}
-		if rlen > 0 && !m.Write(read, window) {
-			return r(Fault)
-		}
-		return r(Success)
-	}}
+	return c, p, Success
+}
+
+// finish is the end of a submit, once its frame is over: the read window goes
+// to the guest only if the stream succeeded.
+func (p *pending) finish(m wasi.Memory) wasi.Result {
+	if p.e != Success {
+		return r(p.e)
+	}
+	if len(p.window) > 0 && !m.Write(p.read, p.window) {
+		return r(Fault)
+	}
+	return r(Success)
+}
+
+// submitBegin is submit without the wait: the frame runs while the guest does
+// other work (Quake's sound mix, between the slices of a world draw), and
+// submit_ready and submit_end say when it is over. One frame per context may be
+// begun at a time.
+func (in *instance) submitBegin(h, frame, flen, read, rlen uint32, m wasi.Memory) wasi.Result {
+	in.mu.Lock()
+	c := in.ctxs[h]
+	in.mu.Unlock()
+	if c != nil && c.pend.Load() != nil {
+		return r(InvalidArgument) // a begun frame is still to be ended
+	}
+	c, p, e := in.start(h, frame, flen, read, rlen, m)
+	if e != Success {
+		return r(e)
+	}
+	c.pend.Store(p)
+	return r(Success)
+}
+
+// submitReady stores at out whether the begun frame is over (1) or not (0). It
+// never waits.
+func (in *instance) submitReady(h, out uint32, m wasi.Memory) wasi.Result {
+	in.mu.Lock()
+	c := in.ctxs[h]
+	in.mu.Unlock()
+	if c == nil {
+		return r(InvalidArgument)
+	}
+	p := c.pend.Load()
+	if p == nil {
+		return r(InvalidArgument)
+	}
+	var b [4]byte
+	select {
+	case <-p.done:
+		b[0] = 1
+	default:
+	}
+	if !m.Write(out, b[:]) {
+		return r(Fault)
+	}
+	return r(Success)
+}
+
+// submitEnd waits for the begun frame (at once when it is over) and returns what
+// submit would have: the read window filled, or the frame's errno.
+func (in *instance) submitEnd(h uint32) wasi.Result {
+	in.mu.Lock()
+	c := in.ctxs[h]
+	in.mu.Unlock()
+	if c == nil {
+		return r(InvalidArgument)
+	}
+	p := c.pend.Swap(nil)
+	if p == nil {
+		return r(InvalidArgument)
+	}
+	return wasi.Result{Wait: p.done, Resume: func(m wasi.Memory) wasi.Result { return p.finish(m) }}
 }
 
 // runSubmit is one submit's life on the host: decode (a refusal costs no

@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/go-gfx/webgpu"
 	"github.com/go-gfx/webgpu/wire"
@@ -107,6 +108,24 @@ type Host interface {
 	ContextDestroy(ctx uint32) Errno
 }
 
+// AsyncHost is implemented by a Host that can run a frame without blocking the
+// guest (the imports submit_begin, submit_ready and submit_end). A Sink with an
+// idle function (SetIdle) uses it: while the GPU works on a frame the program
+// keeps doing something else (a game's sound mix) instead of standing still.
+type AsyncHost interface {
+	// SubmitBegin sends a frame and returns at once. frame is copied; read must
+	// stay alive and untouched until SubmitEnd, which fills it.
+	SubmitBegin(ctx uint32, frame, read []byte) Errno
+	// SubmitReady says whether the begun frame is over. It never waits.
+	SubmitReady(ctx uint32) (bool, Errno)
+	// SubmitEnd waits for the begun frame and returns its result, read filled.
+	SubmitEnd(ctx uint32) Errno
+}
+
+// IdleSlice is the time between two polls of a begun frame while the idle
+// function runs.
+const IdleSlice = 2 * time.Millisecond
+
 // ErrorReporter is implemented by a Host that can say why its last call
 // failed (the wasi_webgpu_batch import last_error). A Sink asks it after a
 // failed submit and puts the message in the Error.
@@ -139,6 +158,69 @@ type Sink struct {
 	err  error  // the error that lost the context
 	subs int
 	done bool
+	// idle is what the program does while a frame runs on the GPU (SetIdle);
+	// sleep is time.Sleep, replaced by a test.
+	idle   func() error
+	sleep  func(time.Duration)
+	slices int // idle slices spent waiting, all submits
+}
+
+// SetIdle sets the work done while a frame waits for the GPU: with a host that
+// is an AsyncHost, a submit begins the frame, then polls it every IdleSlice and
+// calls f between polls until it is over (WinQuake's S_ExtraUpdate inside the
+// world draw, r_main.c lines 937, 982, 991). nil, or a host without the async
+// imports, is the blocking submit. f runs on the program's goroutine, with the
+// sink's lock held: it must not use the sink.
+func (s *Sink) SetIdle(f func() error) {
+	s.mu.Lock()
+	s.idle = f
+	s.mu.Unlock()
+}
+
+// IdleSlices is the number of polls that found the frame still running (and
+// ran the idle function) since the sink opened.
+func (s *Sink) IdleSlices() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.slices
+}
+
+// cross sends one frame with its read window and returns once the GPU is done.
+func (s *Sink) cross(frame, window []byte) error {
+	ah, ok := s.h.(AsyncHost)
+	if !ok || s.idle == nil {
+		if e := s.h.Submit(s.ctx, frame, window); e != Success {
+			return s.lose(s.fail("submit", e))
+		}
+		return nil
+	}
+	if e := ah.SubmitBegin(s.ctx, frame, window); e != Success {
+		return s.lose(s.fail("submit", e))
+	}
+	sleep := s.sleep
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+	var idleErr error
+	for {
+		ready, e := ah.SubmitReady(s.ctx)
+		if e != Success {
+			ah.SubmitEnd(s.ctx) // leave nothing begun
+			return s.lose(s.fail("submit", e))
+		}
+		if ready {
+			break
+		}
+		if idleErr == nil {
+			idleErr = s.idle()
+		}
+		s.slices++
+		sleep(IdleSlice)
+	}
+	if e := ah.SubmitEnd(s.ctx); e != Success {
+		return s.lose(s.fail("submit", e))
+	}
+	return idleErr
 }
 
 // NewSink queries the host's capset and creates a context on it.
@@ -219,12 +301,14 @@ func (s *Sink) flush(window []byte) error {
 	if err != nil {
 		return s.lose(err)
 	}
-	if e := s.h.Submit(s.ctx, frame, window); e != Success {
-		return s.lose(s.fail("submit", e))
+	err = s.cross(frame, window)
+	if err == nil || s.err == nil {
+		// Sent: an idle function that failed after the frame ran leaves the
+		// context usable, and its error is returned.
+		s.subs++
+		s.reset()
 	}
-	s.subs++
-	s.reset()
-	return nil
+	return err
 }
 
 func (s *Sink) lose(err error) error {
@@ -296,11 +380,11 @@ func (s *Sink) Raw(frame, window []byte) error {
 	if err := s.flush(nil); err != nil {
 		return err
 	}
-	if e := s.h.Submit(s.ctx, frame, window); e != Success {
-		return s.lose(s.fail("submit", e))
+	err := s.cross(frame, window)
+	if err == nil || s.err == nil {
+		s.subs++
 	}
-	s.subs++
-	return nil
+	return err
 }
 
 // Close sends what is pending and destroys the host context. The Sink is

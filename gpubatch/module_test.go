@@ -398,6 +398,93 @@ func TestSubmitReadBack(t *testing.T) {
 	}
 }
 
+// submit_begin returns while the frame still runs, submit_ready says 0 until it
+// is over and 1 after (never waiting), and submit_end fills the same window
+// submit does. A second begin before the end, and a ready or an end with no
+// begin, are InvalidArgument.
+func TestSubmitBeginReadyEnd(t *testing.T) {
+	g := newGuest(t, gpuCaps, nil)
+	ctx := g.newContext()
+	f := bufferFrame(t, 1, 256, webgpu.BufferUsageMapRead|webgpu.BufferUsageCopyDst,
+		[]uint32{uint32(wire.ReadBuffer), 1, 8, 0, 16, 4}, nil)
+	g.dev.delay = 300 * time.Millisecond
+	copy(g.m[4096:], f)
+	t0 := time.Now()
+	if e := g.call(fnSubmitBegin, uint64(ctx), 4096, uint64(len(f)), 8192, 32); e != Success {
+		t.Fatalf("submit_begin: %d", e)
+	}
+	if d := time.Since(t0); d > 150*time.Millisecond {
+		t.Fatalf("submit_begin waited %v for the frame", d)
+	}
+	if e := g.call(fnSubmitBegin, uint64(ctx), 4096, uint64(len(f)), 8192, 32); e != InvalidArgument {
+		t.Errorf("a second submit_begin: %d, want InvalidArgument", e)
+	}
+	ready := func() uint32 {
+		t.Helper()
+		if e := g.call(fnSubmitReady, uint64(ctx), 64); e != Success {
+			t.Fatalf("submit_ready: %d", e)
+		}
+		return binary.LittleEndian.Uint32(g.m[64:])
+	}
+	if ready() != 0 {
+		t.Error("submit_ready: 1 while the frame is still running")
+	}
+	if d := time.Since(t0); d > 150*time.Millisecond {
+		t.Errorf("submit_ready waited (%v)", d)
+	}
+	for ready() == 0 {
+		time.Sleep(5 * time.Millisecond)
+		if time.Since(t0) > 5*time.Second {
+			t.Fatal("the frame never finished")
+		}
+	}
+	if e := g.call(fnSubmitEnd, uint64(ctx)); e != Success {
+		t.Fatalf("submit_end: %d", e)
+	}
+	for i := 0; i < 16; i++ {
+		if g.m[8192+4+i] != byte(8+i) {
+			t.Fatalf("window byte %d = %d: the read window was not filled", i, g.m[8192+4+i])
+		}
+	}
+	if e := g.call(fnSubmitEnd, uint64(ctx)); e != InvalidArgument {
+		t.Errorf("submit_end with nothing begun: %d", e)
+	}
+	if e := g.call(fnSubmitReady, uint64(ctx), 64); e != InvalidArgument {
+		t.Errorf("submit_ready with nothing begun: %d", e)
+	}
+	if r, _, _ := g.dev.snapshot(); r != 1 {
+		t.Errorf("%d replays, want 1", r)
+	}
+}
+
+// submit_end of a frame still running waits for it, and a refused frame's errno
+// comes back from submit_end, not from submit_begin.
+func TestSubmitEndWaitsAndReportsTheErrno(t *testing.T) {
+	g := newGuest(t, gpuCaps, nil)
+	ctx := g.newContext()
+	f := bufferFrame(t, 1, 256, webgpu.BufferUsageMapRead|webgpu.BufferUsageCopyDst,
+		[]uint32{uint32(wire.ReadBuffer), 1, 8, 0, 16, 4}, nil)
+	g.dev.delay = 200 * time.Millisecond
+	copy(g.m[4096:], f)
+	t0 := time.Now()
+	if e := g.call(fnSubmitBegin, uint64(ctx), 4096, uint64(len(f)), 8192, 32); e != Success {
+		t.Fatalf("submit_begin: %d", e)
+	}
+	if e := g.call(fnSubmitEnd, uint64(ctx)); e != Success {
+		t.Fatalf("submit_end: %d", e)
+	}
+	if d := time.Since(t0); d < 150*time.Millisecond {
+		t.Errorf("submit_end returned after %v, before the frame was over", d)
+	}
+	// Argument errors come from submit_begin itself, as from submit.
+	if e := g.call(fnSubmitBegin, uint64(ctx), 4096, 3, 8192, 32); e != TooLarge {
+		t.Errorf("submit_begin of a 3-byte frame: %d, want TooLarge", e)
+	}
+	if e := g.call(fnSubmitBegin, 99, 4096, uint64(len(f)), 8192, 32); e != InvalidArgument {
+		t.Errorf("submit_begin on no context: %d", e)
+	}
+}
+
 // The frame is copied out of guest memory before it is decoded: a guest
 // that rewrites it while the host works changes nothing.
 func TestFrameCopiedBeforeDecode(t *testing.T) {
@@ -614,8 +701,17 @@ func TestLimitsDefaultsAndHostModules(t *testing.T) {
 		t.Errorf("a set draw quota became %d / %d", l.MaxDrawVertices, l.MaxStreamVertices)
 	}
 	hm := HostModules(nil)
-	if len(hm) != 1 || hm[0].Module() != "wasi_webgpu_batch" || len(hm[0].Funcs()) != 5 {
+	if len(hm) != 1 || hm[0].Module() != "wasi_webgpu_batch" || len(hm[0].Funcs()) != 8 {
 		t.Errorf("%v", hm)
+	}
+	// The first five keep their indexes (a host older than the async imports
+	// numbers them the same); the async ones come after.
+	var names []string
+	for _, f := range hm[0].Funcs() {
+		names = append(names, f.Name)
+	}
+	if got := strings.Join(names, " "); got != "caps context_create submit context_destroy last_error submit_begin submit_ready submit_end" {
+		t.Errorf("functions: %s", got)
 	}
 	for i, f := range hm[0].Funcs() {
 		if f.Result != "i" || len(f.Params) != len(funcs[i].Params) {

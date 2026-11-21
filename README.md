@@ -118,7 +118,14 @@ recreates its context, nobody is sanctioned. Without
   UTF-8, the browser's WGSL line and column included) to `buf` and stores its
   full length at `out`. `batchsink.Error.Msg` carries it, so the guest sees
   `submit: invalid shader or object (the GPU refused it): ... :1:42 error:
-  'meta' is a reserved keyword`. `examples/batchcompute shaders` runs a
+  'meta' is a reserved keyword`.
+  **A guest can work while a frame runs**: `submit_begin(ctx, frame, len,
+  read, read_len)` starts a frame and returns, `submit_ready(ctx, out)` stores
+  1 (over) or 0 (running) at `out` without waiting, and `submit_end(ctx)` waits
+  and returns what `submit` would have (the read window filled). One begun
+  frame per context. `batchsink.Sink.SetIdle(f)` makes every submit use them
+  and call `f` every 2 ms while the GPU works (Quake's sound mix inside the
+  world draw). A guest built with these imports needs a host that has them. `examples/batchcompute shaders` runs a
   reserved word, a syntax error and a valid control in a container
   (e2e); go-gfx/webgpu v0.9.0 does the scoping.
 - **GPU memory**: `wctr run --gpu --gpu-memory=SIZE` (default 256 MiB, at most

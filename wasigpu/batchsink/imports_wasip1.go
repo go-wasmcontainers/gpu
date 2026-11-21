@@ -13,6 +13,15 @@ func hostContextCreate(out unsafe.Pointer) uint32
 //go:wasmimport wasi_webgpu_batch submit
 func hostSubmit(ctx uint32, frame unsafe.Pointer, frameLen uint32, read unsafe.Pointer, readLen uint32) uint32
 
+//go:wasmimport wasi_webgpu_batch submit_begin
+func hostSubmitBegin(ctx uint32, frame unsafe.Pointer, frameLen uint32, read unsafe.Pointer, readLen uint32) uint32
+
+//go:wasmimport wasi_webgpu_batch submit_ready
+func hostSubmitReady(ctx uint32, out unsafe.Pointer) uint32
+
+//go:wasmimport wasi_webgpu_batch submit_end
+func hostSubmitEnd(ctx uint32) uint32
+
 //go:wasmimport wasi_webgpu_batch last_error
 func hostLastError(ctx uint32, buf unsafe.Pointer, n uint32, out unsafe.Pointer) uint32
 
@@ -40,6 +49,17 @@ func (wasi) ContextCreate() (uint32, Errno) {
 func (wasi) Submit(ctx uint32, frame, read []byte) Errno {
 	return Errno(hostSubmit(ctx, ptr(frame), uint32(len(frame)), ptr(read), uint32(len(read))))
 }
+
+// SubmitBegin, SubmitReady and SubmitEnd implement AsyncHost.
+func (wasi) SubmitBegin(ctx uint32, frame, read []byte) Errno {
+	return Errno(hostSubmitBegin(ctx, ptr(frame), uint32(len(frame)), ptr(read), uint32(len(read))))
+}
+func (wasi) SubmitReady(ctx uint32) (bool, Errno) {
+	var v uint32
+	e := Errno(hostSubmitReady(ctx, unsafe.Pointer(&v)))
+	return v != 0, e
+}
+func (wasi) SubmitEnd(ctx uint32) Errno      { return Errno(hostSubmitEnd(ctx)) }
 func (wasi) ContextDestroy(ctx uint32) Errno { return Errno(hostContextDestroy(ctx)) }
 
 // LastError implements ErrorReporter.

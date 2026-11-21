@@ -89,8 +89,9 @@ func FuzzBatchCalls(f *testing.F) {
 			}
 			return uint64(v)
 		}
+		var beginLo, beginHi uint64
 		for len(ops) >= 11 {
-			fn := int(ops[0] % 6)
+			fn := int(ops[0] % byte(len(funcs)+1)) // the last value is no function: it traps
 			var args []uint64
 			for i := 0; i < 5; i++ {
 				args = append(args, widen(binary.LittleEndian.Uint16(ops[1+2*i:]), ops[11-1], i))
@@ -121,6 +122,12 @@ func FuzzBatchCalls(f *testing.F) {
 				lo, hi = args[0], args[0]+4
 			case fnSubmit:
 				lo, hi = args[3], args[3]+args[4]
+			case fnSubmitBegin:
+				beginLo, beginHi = args[3], args[3]+args[4] // submit_end may write here
+			case fnSubmitReady:
+				lo, hi = args[1], args[1]+4
+			case fnSubmitEnd:
+				lo, hi = beginLo, beginHi
 			case fnLastError: // last_error(ctx, buf, len, out)
 				lo, hi = args[1], args[1]+args[2]
 				lo2, hi2 = args[3], args[3]+4
