@@ -170,14 +170,34 @@ type Sink struct {
 		name string
 		d    time.Duration
 	}
+	// waited is the time of the submits since ResetSlowest spent waiting for the
+	// GPU (from the frame sent to its end), idled the part of it spent in the
+	// idle function.
+	waited, idled time.Duration
 }
 
-// ResetSlowest forgets the longest host call, to start a reading.
+// ResetSlowest forgets the longest host call and the waited time, to start a
+// reading.
 func (s *Sink) ResetSlowest() {
 	s.mu.Lock()
 	s.slow.name, s.slow.d = "", 0
+	s.waited, s.idled = 0, 0
 	s.mu.Unlock()
 }
+
+// Waited is the time the submits since ResetSlowest spent waiting for the GPU,
+// from the frame being sent to its result (the whole call of a blocking submit),
+// and idle, the part of it the idle function ran: what a frame spent that is not
+// the program's own work before it. The rest of a frame's time is the program's
+// (recording the commands, copying the result), which no idle slice can run in.
+func (s *Sink) Waited() (wait, idle time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.waited, s.idled
+}
+
+// since is the time from t0 on the sink's clock.
+func (s *Sink) since(t0 time.Time) time.Duration { return s.clock().Sub(t0) }
 
 // Slowest is the longest single host call of a submit (submit, submit_begin,
 // submit_ready or submit_end; the idle function between polls is not part of
@@ -189,21 +209,10 @@ func (s *Sink) Slowest() (string, time.Duration) {
 }
 
 // start and note time one host call.
-func (s *Sink) start() time.Time {
-	if s.clock == nil {
-		return time.Now()
-	}
-	return s.clock()
-}
+func (s *Sink) start() time.Time { return s.clock() }
 
 func (s *Sink) note(name string, t0 time.Time) {
-	var d time.Duration
-	if s.clock == nil {
-		d = time.Since(t0)
-	} else {
-		d = s.clock().Sub(t0)
-	}
-	if d > s.slow.d {
+	if d := s.since(t0); d > s.slow.d {
 		s.slow.name, s.slow.d = name, d
 	}
 }
@@ -235,6 +244,7 @@ func (s *Sink) cross(frame, window []byte) error {
 		t0 := s.start()
 		e := s.h.Submit(s.ctx, frame, window)
 		s.note("submit", t0)
+		s.waited += s.since(t0)
 		if e != Success {
 			return s.lose(s.fail("submit", e))
 		}
@@ -246,6 +256,8 @@ func (s *Sink) cross(frame, window []byte) error {
 	if e != Success {
 		return s.lose(s.fail("submit", e))
 	}
+	sent := s.start()
+	defer func() { s.waited += s.since(sent) }()
 	sleep := s.sleep
 	if sleep == nil {
 		sleep = time.Sleep
@@ -263,7 +275,9 @@ func (s *Sink) cross(frame, window []byte) error {
 			break
 		}
 		if idleErr == nil {
+			ti := s.start()
 			idleErr = s.idle()
+			s.idled += s.since(ti)
 		}
 		s.slices++
 		sleep(IdleSlice)
@@ -294,7 +308,7 @@ func NewSink(h Host) (*Sink, error) {
 	if e != Success {
 		return nil, &Error{Op: "context_create", Errno: e}
 	}
-	s := &Sink{h: h, ctx: ctx, caps: caps, enc: wgpubatch.NewEncoder(caps.MaxFrame)}
+	s := &Sink{h: h, ctx: ctx, caps: caps, enc: wgpubatch.NewEncoder(caps.MaxFrame), clock: time.Now}
 	s.reset()
 	return s, nil
 }
