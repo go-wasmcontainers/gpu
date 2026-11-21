@@ -65,7 +65,13 @@ func newAsyncSink(t *testing.T, polls int) (*Sink, *asyncHost) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.sleep = func(time.Duration) {}
+	slept := 0
+	s.sleep = func(time.Duration) {
+		// a poll loop that ignores a host error would spin for ever: fail instead
+		if slept++; slept > 1000 {
+			t.Fatal("the poll loop did not stop: a host error from submit_ready was ignored")
+		}
+	}
 	return s, h
 }
 
