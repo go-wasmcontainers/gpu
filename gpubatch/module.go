@@ -707,7 +707,12 @@ func (in *instance) runSubmit(c *gctx, frame, window []byte) Errno {
 	}
 	t0 := time.Now()
 	res := make(chan Errno, 1)
-	go func() { res <- in.runFrame(c, msgs, lim, window) }()
+	var made []Creation // read only after the frame answered
+	var madeP *[]Creation
+	if SlowSubmit != nil && creates {
+		madeP = &made
+	}
+	go func() { res <- in.runFrame(c, msgs, lim, window, madeP) }()
 	timer := time.NewTimer(budget)
 	defer timer.Stop()
 	select {
@@ -715,7 +720,9 @@ func (in *instance) runSubmit(c *gctx, frame, window []byte) Errno {
 		el := time.Since(t0)
 		rel(nil)
 		if h := SlowSubmit; h != nil && el >= SlowSubmitMin {
-			h(infoOf(frame, len(msgs), countCreates(msgs), t0.Sub(queued), el))
+			i := infoOf(frame, len(msgs), countCreates(msgs), t0.Sub(queued), el)
+			i.Creations = made
+			h(i)
 		}
 		in.m.record(func(s *Stats) {
 			s.Submits++
@@ -840,7 +847,7 @@ func (in *instance) loseDevice() {
 
 // runFrame applies a decoded frame. Any error loses the context and
 // releases what it held.
-func (in *instance) runFrame(c *gctx, msgs []wgpubatch.Message, lim wgpubatch.Limits, window []byte) (e Errno) {
+func (in *instance) runFrame(c *gctx, msgs []wgpubatch.Message, lim wgpubatch.Limits, window []byte, made *[]Creation) (e Errno) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed.Load() {
@@ -859,7 +866,11 @@ func (in *instance) runFrame(c *gctx, msgs []wgpubatch.Message, lim wgpubatch.Li
 		case wgpubatch.MsgCreate:
 			var cr wgpubatch.Create
 			if cr, err = msg.Create(lim); err == nil {
+				t0 := time.Now()
 				err = c.c.Create(cr.ID, cr.Kind, cr.Descriptor)
+				if made != nil {
+					*made = append(*made, Creation{Kind: kindName(cr.Kind), Bytes: len(cr.Descriptor), Ran: time.Since(t0)})
+				}
 			}
 		case wgpubatch.MsgDestroy:
 			var ids []uint32

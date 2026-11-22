@@ -17,7 +17,12 @@ func init() {
 		if l.Length() >= slowKeep {
 			return
 		}
+		made := js.Global().Get("Array").New()
+		for _, c := range i.Creations {
+			made.Call("push", map[string]any{"kind": c.Kind, "bytes": c.Bytes, "ran": float64(c.Ran.Microseconds()) / 1000})
+		}
 		l.Call("push", map[string]any{
+			"made":     made,
 			"at":       js.Global().Get("performance").Call("now").Float() + js.Global().Get("performance").Get("timeOrigin").Float(),
 			"ran":      float64(i.Ran.Microseconds()) / 1000,
 			"waited":   float64(i.Waited.Microseconds()) / 1000,
