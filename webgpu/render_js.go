@@ -342,14 +342,22 @@ func (s *session) present(c *contextObj) error {
 	if sf.pace.now == nil {
 		sf.pace = pacer{interval: s.b.FrameInterval, now: time.Now, sleep: time.Sleep}
 	}
-	sf.pace.wait()
-	if sf.emit != nil {
-		seq := sf.frames.next(AckWait)
-		bm := sf.canvas.Call("transferToImageBitmap")
-		sf.emit(SurfaceEvent{Op: "frame", Surface: sf.id, Seq: seq, Width: sf.canvas.Get("width").Int(), Height: sf.canvas.Get("height").Int(), Bitmap: bm})
-		return nil
-	}
-	sf.canvas.Call("transferToImageBitmap").Call("close")
+	var seq uint64
+	timePresent(time.Now,
+		sf.pace.wait,
+		func() {
+			if sf.emit != nil {
+				seq = sf.frames.next(AckWait)
+			}
+		},
+		func() {
+			if sf.emit != nil {
+				bm := sf.canvas.Call("transferToImageBitmap")
+				sf.emit(SurfaceEvent{Op: "frame", Surface: sf.id, Seq: seq, Width: sf.canvas.Get("width").Int(), Height: sf.canvas.Get("height").Int(), Bitmap: bm})
+				return
+			}
+			sf.canvas.Call("transferToImageBitmap").Call("close")
+		})
 	return nil
 }
 
