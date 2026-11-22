@@ -1,6 +1,7 @@
 package gpubatch
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/go-virtio/gpu/wgpubatch"
@@ -17,6 +18,27 @@ type SubmitInfo struct {
 	Bytes       int // the frame's size
 	Commands    int // its decoded messages
 	Creates     int // of which object creations (shaders, pipelines, buffers)
+	// Creations is what each creation of the frame was and cost, in order.
+	Creations []Creation
+}
+
+// Creation is one object creation of a slow frame: what it made, how large its
+// descriptor was (a shader's source, a texture's size) and how long the
+// provider took.
+type Creation struct {
+	Kind  string
+	Bytes int
+	Ran   time.Duration
+}
+
+// kindNames are the wire kinds of a creation descriptor (go-gfx/webgpu/wire).
+var kindNames = [...]string{1: "buffer", 2: "texture", 3: "texture-view", 4: "sampler", 5: "shader-module", 6: "bind-group-layout", 7: "pipeline-layout", 8: "bind-group", 9: "render-pipeline", 10: "compute-pipeline"}
+
+func kindName(k uint32) string {
+	if int(k) < len(kindNames) && kindNames[k] != "" {
+		return kindNames[k]
+	}
+	return "kind-" + strconv.FormatUint(uint64(k), 10)
 }
 
 // SlowSubmit, when set, is called with every submit whose frame ran SlowSubmitMin
