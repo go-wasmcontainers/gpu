@@ -55,6 +55,15 @@ type Memory interface {
 	Write(off uint32, b []byte) bool
 }
 
+// OwnedReader is a Memory that can hand out bytes the caller owns: ReadOwned
+// is Read, and the slice it returns is a new array that nothing else holds or
+// writes (not a view of the guest's memory, not a pooled buffer), so a list<u8>
+// can be that slice without a second copy.
+type OwnedReader interface {
+	Memory
+	ReadOwned(off, n uint32) ([]byte, bool)
+}
+
 // ErrTrap wraps every error that the Canonical ABI defines as a trap.
 var ErrTrap = errors.New("canonical ABI trap")
 
@@ -407,6 +416,19 @@ func loadList(m Memory, ptr, n uint32, elem *Type) (any, error) {
 	if elem.Kind == U8 {
 		if n > MaxListBytes {
 			return nil, trap("list of %d bytes", n)
+		}
+		// A memory whose Read already returns a fresh copy (the browser's
+		// does: one copy out of the guest's linear memory) says so by
+		// ReadOwned, and the list is that copy: copying it again doubled the
+		// bytes a host call allocated, and a frame of vertex and texture writes
+		// is megabytes (go-wasmcontainers/playground#63: Go's collector ran
+		// on the engine's one thread, in the middle of host calls).
+		if o, ok := m.(OwnedReader); ok {
+			b, okr := o.ReadOwned(ptr, n)
+			if !okr {
+				return nil, trap("%d bytes at %#x out of bounds", n, ptr)
+			}
+			return b, nil
 		}
 		b, err := read(m, ptr, n)
 		if err != nil {
