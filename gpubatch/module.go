@@ -714,6 +714,9 @@ func (in *instance) runSubmit(c *gctx, frame, window []byte) Errno {
 	case e := <-res:
 		el := time.Since(t0)
 		rel(nil)
+		if h := SlowSubmit; h != nil && el >= SlowSubmitMin {
+			h(infoOf(frame, len(msgs), countCreates(msgs), t0.Sub(queued), el))
+		}
 		in.m.record(func(s *Stats) {
 			s.Submits++
 			s.MaxWait = max(s.MaxWait, t0.Sub(queued))
