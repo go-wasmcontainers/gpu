@@ -719,6 +719,9 @@ func (in *instance) runSubmit(c *gctx, frame, window []byte) Errno {
 	case e := <-res:
 		el := time.Since(t0)
 		rel(nil)
+		if h := Created; h != nil && creates {
+			h(countCreates(msgs))
+		}
 		if h := SlowSubmit; h != nil && el >= SlowSubmitMin {
 			i := infoOf(frame, len(msgs), countCreates(msgs), t0.Sub(queued), el)
 			i.Creations = made
