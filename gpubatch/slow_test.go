@@ -70,8 +70,12 @@ func TestKindNameCoversTheWireKinds(t *testing.T) {
 // A fast submit is not reported: the list stays the slow calls only.
 func TestFastSubmitIsNotReported(t *testing.T) {
 	n := 0
+	// A fast submit is one under the threshold; a wall-clock 10 ms is not fast on
+	// a loaded runner under -race (run 45083368019), so the threshold is raised.
+	min := SlowSubmitMin
+	SlowSubmitMin = time.Minute
 	SlowSubmit = func(SubmitInfo) { n++ }
-	t.Cleanup(func() { SlowSubmit = nil })
+	t.Cleanup(func() { SlowSubmit = nil; SlowSubmitMin = min })
 	g := newGuest(t, gpuCaps, nil)
 	c := g.newContext()
 	if e := g.submit(c, bufferFrame(t, 1, 64, webgpu.BufferUsageCopyDst, nil, nil), 4096, 0, 0); e != Success {

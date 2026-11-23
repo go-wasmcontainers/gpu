@@ -9,7 +9,10 @@ import (
 
 // SlowSubmitMin is the time on the GPU's turn from which a submit is reported
 // to SlowSubmit.
-const SlowSubmitMin = 10 * time.Millisecond
+//
+// It is a variable only so that a test can raise it above the jitter of a loaded
+// runner; nothing else changes it.
+var SlowSubmitMin = 10 * time.Millisecond
 
 // SubmitInfo is what one submit was: how long its frame ran (the turn, not the
 // wait for it), how long it waited for the turn, and what the frame held.
