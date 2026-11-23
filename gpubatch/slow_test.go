@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-gfx/webgpu"
 	"github.com/go-gfx/webgpu/wire"
+	"github.com/go-virtio/gpu/wgpubatch"
 )
 
 // A submit that runs SlowSubmitMin or more is reported with what its frame held:
@@ -64,6 +65,38 @@ func TestKindNameCoversTheWireKinds(t *testing.T) {
 	}
 	if kindName(99) != "kind-99" {
 		t.Errorf("an unknown kind is named %q", kindName(99))
+	}
+}
+
+// Created counts the objects a submit creates, fast or slow, and a steady frame
+// (a stream of commands on objects that exist) creates none: the count does not
+// move across it. A page reads this to assert 0 creations per frame.
+func TestCreatedCountsCreationsAndASteadyFrameAddsNone(t *testing.T) {
+	total := 0
+	Created = func(n int) { total += n }
+	t.Cleanup(func() { Created = nil })
+	g := newGuest(t, gpuCaps, nil)
+	c := g.newContext()
+	if e := g.submit(c, bufferFrame(t, 1, 64, webgpu.BufferUsageCopyDst, nil, nil), 4096, 0, 0); e != Success {
+		t.Fatalf("errno %d", e)
+	}
+	if total != 1 {
+		t.Fatalf("after the creating frame the count is %d, want 1", total)
+	}
+	e := wgpubatch.NewEncoder(1 << 20)
+	e.Stream([]uint32{uint32(wire.WriteBuffer), 1, 0, 0, 0, 4}, make([]byte, 4))
+	f, err := e.Frame()
+	if err != nil {
+		t.Fatal(err)
+	}
+	steady := append([]byte(nil), f...)
+	for i := 0; i < 5; i++ {
+		if e := g.submit(c, steady, 4096, 0, 0); e != Success {
+			t.Fatalf("steady frame %d: errno %d", i, e)
+		}
+	}
+	if total != 1 {
+		t.Fatalf("five steady frames moved the count to %d, want it to stay 1", total)
 	}
 }
 

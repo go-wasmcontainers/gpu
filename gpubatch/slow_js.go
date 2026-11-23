@@ -8,6 +8,14 @@ import "syscall/js"
 const slowKeep = 400
 
 func init() {
+	Created = func(n int) {
+		g := js.Global()
+		total := n
+		if v := g.Get("__batchCreated"); !v.IsUndefined() {
+			total += v.Int()
+		}
+		g.Set("__batchCreated", total)
+	}
 	SlowSubmit = func(i SubmitInfo) {
 		l := js.Global().Get("__batchSlow")
 		if l.IsUndefined() {

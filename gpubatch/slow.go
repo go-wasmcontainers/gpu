@@ -50,6 +50,12 @@ func kindName(k uint32) string {
 // list in self.__batchSlow (slow_js.go).
 var SlowSubmit func(SubmitInfo)
 
+// Created, when set, is called with the number of objects each submit that
+// creates any has created, fast or slow: a steady frame creates none, and a
+// test can say so by reading a count that does not move. The browser build adds
+// to self.__batchCreated (slow_js.go).
+var Created func(n int)
+
 // infoOf describes a decoded frame.
 func infoOf(frame []byte, nmsgs, creates int, waited, ran time.Duration) SubmitInfo {
 	return SubmitInfo{Ran: ran, Waited: waited, Bytes: len(frame), Commands: nmsgs, Creates: creates}
