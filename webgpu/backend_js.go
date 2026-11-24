@@ -903,7 +903,10 @@ func (s *session) submit(a []any) (any, error) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), s.b.GPUTime)
 		defer cancel()
+		start := time.Now()
 		if err := q.dev.WaitSubmitted(ctx, seq); errors.Is(err, context.DeadlineExceeded) {
+			now := time.Now()
+			println(WatchdogReport(seq, q.dev.Submitted(), now.Sub(start), s.b.GPUTime, now))
 			s.loseDevices()
 		}
 	}()
