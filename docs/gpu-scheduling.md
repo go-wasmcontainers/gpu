@@ -311,3 +311,10 @@ state: after its watchdog it answered "no adapter" to every `requestAdapter` for
 victim could not recreate its context inside that window. Layer 4 keeps shaders from reaching the
 watchdog (cut at 44 to 65 ms against 3.15 s), so the case now needs a shader the host does not bound
 (there is none left on the three paths) or a GPU slower than the default work assumes.
+
+**What the host prints when the budget is overrun.** The expiry of a submit's `GPUTime` wait writes one
+line to stderr (`WatchdogReport`): `gpu watchdog: submit #N overran its GPU time budget (waited W of L,
+K later submit(s) queued behind it, at HH:MM:SS.mmmZ)`. Without it the only trace was the guest's later
+"revoked (an earlier submit overran its GPU time budget)", which says neither which submit, nor when, nor
+whether the wait ran its whole budget (engine#84: Firefox, where `onSubmittedWorkDone` resolves on a
+100 ms poll tick).
