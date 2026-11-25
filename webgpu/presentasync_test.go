@@ -42,15 +42,40 @@ func (s *slowSession) seen() []string {
 	return append([]string(nil), s.calls...)
 }
 
+// lockedMem is guest memory the host goroutine and the test may touch at once.
+type lockedMem struct {
+	mu sync.Mutex
+	m  mem
+}
+
+func (l *lockedMem) Read(off, n uint32) ([]byte, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b, ok := l.m.Read(off, n)
+	return append([]byte(nil), b...), ok
+}
+
+func (l *lockedMem) Write(off uint32, b []byte) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.m.Write(off, b)
+}
+
+// word is the little-endian u32 at off.
+func (l *lockedMem) word(off uint32) uint32 {
+	b, _ := l.Read(off, 4)
+	return binary.LittleEndian.Uint32(b)
+}
+
 // presentHarness opens the surface-webgpu module on a slow session.
-func presentHarness(t *testing.T) (*slowSession, *Module, wasi.Instance, mem) {
+func presentHarness(t *testing.T) (*slowSession, *Module, wasi.Instance, *lockedMem) {
 	t.Helper()
 	s := &slowSession{gate: make(chan struct{})}
 	m := NewModules(slowBackend{s})[2]
 	in := m.Open(wasi.New(wasi.Config{FS: rootfs.New(), Caps: []string{"gpu"}}))
 	t.Cleanup(in.Close)
-	mm := make(mem, 256)
-	binary.LittleEndian.PutUint32(mm[64:], 7) // the command buffer handle
+	mm := &lockedMem{m: make(mem, 256)}
+	binary.LittleEndian.PutUint32(mm.m[64:], 7) // the command buffer handle
 	return s, m, in, mm
 }
 
@@ -71,12 +96,12 @@ func TestSubmitPresentBeginReturnsWhileTheFrameRuns(t *testing.T) {
 		t.Errorf("begin took %v while the submit was held", d)
 	}
 	time.Sleep(20 * time.Millisecond)
-	if got := binary.LittleEndian.Uint32(mm[128:]); got != 0 {
+	if got := mm.word(128); got != 0 {
 		t.Fatalf("done = %d while the submit is held, want 0", got)
 	}
 	close(s.gate) // the browser lets the frame go
 	deadline := time.Now().Add(2 * time.Second)
-	for binary.LittleEndian.Uint32(mm[128:]) != 1 {
+	for mm.word(128) != 1 {
 		if time.Now().After(deadline) {
 			t.Fatal("done never became 1")
 		}
@@ -119,7 +144,7 @@ func TestSubmitPresentEndWaitsForTheFrame(t *testing.T) {
 	if r = r.Resume(mm); !strings.Contains(r.Trap, "device lost") {
 		t.Errorf("a failed frame: %+v, want a trap naming the failure", r)
 	}
-	if got := binary.LittleEndian.Uint32(mm[128:]); got != 1 {
+	if got := mm.word(128); got != 1 {
 		t.Errorf("done = %d after a failed frame, want 1 (the guest must not poll for ever)", got)
 	}
 }
