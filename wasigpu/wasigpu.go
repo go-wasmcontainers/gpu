@@ -90,9 +90,14 @@ var ErrNoAdapter = errors.New("wasi:webgpu: no adapter")
 // call runs a wasi:webgpu import.
 func call(name string, args ...any) (any, error) { return callIn(webgpuModule, name, args...) }
 
-// callIn runs an import of a module with high-level arguments and returns
+// callIn is callWasi; a test replaces it to run the guest's logic without a
+// host (the arguments of a call that goes through memory cannot be lowered
+// outside a wasm instance).
+var callIn = callWasi
+
+// callWasi runs an import of a module with high-level arguments and returns
 // its lifted result.
-func callIn(module, name string, args ...any) (any, error) {
+func callWasi(module, name string, args ...any) (any, error) {
 	c, ok := calls[module+" "+name]
 	if !ok {
 		return nil, ErrUnavailable
