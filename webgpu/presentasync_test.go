@@ -149,6 +149,48 @@ func TestSubmitPresentEndWaitsForTheFrame(t *testing.T) {
 	}
 }
 
+// callNoPanic runs f and reports a panic as an assertion, so a refusal that is
+// missing fails on what it was for and not by a crash.
+func callNoPanic(t *testing.T, what string, f func() wasi.Result) (r wasi.Result) {
+	t.Helper()
+	defer func() {
+		if p := recover(); p != nil {
+			t.Errorf("%s panicked: %v", what, p)
+		}
+	}()
+	return f()
+}
+
+// TestSubmitPresentRefusesWhatIsMalformed: the refusals the wire cannot reach
+// (the argument count, the type of done) and the message of an end with no begin.
+func TestSubmitPresentRefusesWhatIsMalformed(t *testing.T) {
+	s := &slowSession{gate: make(chan struct{})}
+	defer close(s.gate)
+	mm := &lockedMem{m: make(mem, 256)}
+	var ps presentSlot
+	for _, c := range []struct {
+		name string
+		vals []any
+		want string
+	}{
+		{"too few", []any{uint32(1), uint32(2), []any{uint32(7)}}, "3 arguments"},
+		{"too many", []any{uint32(1), uint32(2), []any{uint32(7)}, uint32(128), nil}, "5 arguments"},
+		{"done a string", []any{uint32(1), uint32(2), []any{uint32(7)}, "128"}, "not a u32"},
+	} {
+		r := callNoPanic(t, c.name, func() wasi.Result { return ps.begin(s, c.vals, mm) })
+		if !strings.Contains(r.Trap, c.want) {
+			t.Errorf("%s: %+v, want a trap containing %q", c.name, r, c.want)
+		}
+	}
+	r := callNoPanic(t, "end", ps.end)
+	if !strings.Contains(r.Trap, "no frame was begun") {
+		t.Errorf("end with no begin: %+v, want the trap naming it", r)
+	}
+	if got := s.seen(); len(got) != 0 {
+		t.Errorf("a refused begin still called %v", got)
+	}
+}
+
 // TestSubmitPresentRefusals: argument errors trap at begin, one frame at a time,
 // and an end with no begin traps.
 func TestSubmitPresentRefusals(t *testing.T) {
