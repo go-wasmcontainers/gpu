@@ -135,6 +135,21 @@ not in wasi-gfx; `wasigpu.Surface.ReadyToPresent`): true when `present` would
 not wait, that is fewer than `MaxFramesInFlight` frames are unacknowledged
 (always true for a surface nobody watches). It polls it in slices and calls
 `present` once it is true; the pacing, the limit and `AckWait` are unchanged.
+`ready-to-present` slices the wait for the page, not the calls themselves:
+`queue.submit` and `context.present` are one blocking round trip each, and the
+browser may hold the host's thread in them for hundreds of milliseconds (40-271
+ms measured on CI against a 0.1 s sound queue). So a guest that must stay fed
+there uses `context.submit-present-begin` / `submit-present-end` (an extension,
+`wasigpu.Surface.BeginFrame`, go-quake1/engine#160): begin takes the queue, the
+command buffers and the address of a guest `u32`, returns at once, and the host
+runs the submit and the present on its own goroutine, storing 1 at that address
+when both are over (an error or not). The guest polls that word in its own
+memory (`PendingFrame.Ready`, an atomic load): a poll served by the host would
+queue behind the thread the browser holds, an answer read from the guest's own
+memory cannot. `submit-present-end` waits (at once when the frame is over) and
+traps on a failure, as `submit` and `present` do. One frame per process may be
+begun at a time, and no other call using the device may come between begin and
+end.
 Surface ids are unique within the engine worker; the `open` event names the
 container, so the dashboard can put the pane under it. A backend learns the
 container through `webgpu.Process{GPU, Container}`.

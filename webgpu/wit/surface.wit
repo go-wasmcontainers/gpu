@@ -97,7 +97,7 @@ interface surface {
 }
 
 interface surface-webgpu {
-  use wasi:webgpu/webgpu@0.3.0-rc.2.{gpu-device, gpu-texture, gpu-texture-format, gpu-texture-usage, predefined-color-space, gpu-canvas-tone-mapping, gpu-canvas-alpha-mode};
+  use wasi:webgpu/webgpu@0.3.0-rc.2.{gpu-device, gpu-texture, gpu-queue, gpu-command-buffer, gpu-texture-format, gpu-texture-usage, predefined-color-space, gpu-canvas-tone-mapping, gpu-canvas-alpha-mode};
   use surface.{surface};
 
   record context-configuration {
@@ -122,5 +122,19 @@ interface surface-webgpu {
     // S_ExtraUpdate, which keeps the sound mix filled) polls this in slices
     // instead of blocking inside present.
     ready-to-present: func() -> bool;
+    // Extension (go-wasmcontainers/gpu, not in wasi-gfx): queue.submit of
+    // command-buffers followed by present, started without waiting. It
+    // returns at once; the host runs the submit and the present on its own
+    // and stores 1 (a little-endian u32) at the guest address done, which the
+    // guest zeroed and keeps aligned, when both are over. The guest reads that
+    // word itself (an atomic load of its own memory, no call), so a poll is not
+    // served by the host thread the browser may be holding in its submit or
+    // its transferToImageBitmap, and does its own work (a sound mix) meanwhile.
+    // submit-present-end waits for the end of the frame (at once when it is
+    // over) and traps if the frame failed, as submit and present trap. One
+    // frame may be begun at a time per process, and begin must be followed by
+    // end before any other call that uses the device.
+    submit-present-begin: func(queue: borrow<gpu-queue>, command-buffers: list<borrow<gpu-command-buffer>>, done: u32);
+    submit-present-end: func();
   }
 }
