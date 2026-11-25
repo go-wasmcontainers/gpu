@@ -1,6 +1,11 @@
 package wasigpu
 
-import "github.com/go-wasmcontainers/gpu/wit"
+import (
+	"sync/atomic"
+	"unsafe"
+
+	"github.com/go-wasmcontainers/gpu/wit"
+)
 
 // Rendering to a surface (wasi-gfx:surface, surface-webgpu): a surface the
 // host shows (in the playground, a pane of the dashboard), a WebGPU context
@@ -97,30 +102,59 @@ func (s *Surface) ReadyToPresent() (bool, error) {
 // presents the frame. Present is paced by the host (60 per second at
 // most in the playground), so a loop of Frame calls is an animation.
 func (s *Surface) Frame(p *RenderPipeline, buffers []*Buffer, clear [4]float64, vertices uint32) error {
+	var drops dropList
+	defer drops.run()
+	cb, err := s.record(&drops, p, buffers, clear, vertices)
+	if err != nil {
+		return err
+	}
+	if _, err := call("[method]gpu-queue.submit", s.d.queue, []any{cb}); err != nil {
+		return err
+	}
+	_, err = callIn(contextModule, "[method]context.present", s.ctx)
+	return err
+}
+
+// dropList is the objects of a frame to release, in the reverse order of their
+// creation, once the frame is over.
+type dropList []func()
+
+func (l *dropList) add(res string, h uint32) { *l = append(*l, func() { drop(res, h) }) }
+
+func (l *dropList) run() {
+	for i := len(*l) - 1; i >= 0; i-- {
+		(*l)[i]()
+	}
+	*l = nil
+}
+
+// record encodes the frame's render pass and returns its command buffer; every
+// object it creates is on drops.
+func (s *Surface) record(drops *dropList, p *RenderPipeline, buffers []*Buffer, clear [4]float64, vertices uint32) (uint32, error) {
 	tex, err := handle(callIn(contextModule, "[method]context.get-current-texture", s.ctx))
 	if err != nil {
-		return err
+		return 0, err
 	}
-	defer drop("gpu-texture", tex)
+	drops.add("gpu-texture", tex)
 	view, err := handle(call("[method]gpu-texture.create-view", tex, nil))
 	if err != nil {
-		return err
+		return 0, err
 	}
-	defer drop("gpu-texture-view", view)
+	drops.add("gpu-texture-view", view)
 	enc, err := handle(call("[method]gpu-device.create-command-encoder", s.d.dev, nil))
 	if err != nil {
-		return err
+		return 0, err
 	}
-	defer drop("gpu-command-encoder", enc)
+	drops.add("gpu-command-encoder", enc)
 	color := wit.Some{Value: []any{clear[0], clear[1], clear[2], clear[3]}}
 	att := wit.Some{Value: []any{view, nil, nil, color, enum("gpu-load-op", "clear"), enum("gpu-store-op", "store")}}
 	pass, err := handle(call("[method]gpu-command-encoder.begin-render-pass", enc, []any{[]any{att}, nil, nil, nil, nil, nil}))
 	if err != nil {
-		return err
+		return 0, err
 	}
-	defer drop("gpu-render-pass-encoder", pass)
+	drops.add("gpu-render-pass-encoder", pass)
 	if _, err := call("[method]gpu-render-pass-encoder.set-pipeline", pass, p.pipe); err != nil {
-		return err
+		return 0, err
 	}
 	if len(buffers) > 0 {
 		var entries []any
@@ -129,22 +163,63 @@ func (s *Surface) Frame(p *RenderPipeline, buffers []*Buffer, clear [4]float64, 
 		}
 		bg, err := handle(call("[method]gpu-device.create-bind-group", s.d.dev, []any{p.layout, entries, nil}))
 		if err != nil {
-			return err
+			return 0, err
 		}
-		defer drop("gpu-bind-group", bg)
+		drops.add("gpu-bind-group", bg)
 		if _, err := unwrap("set-bind-group")(call("[method]gpu-render-pass-encoder.set-bind-group", pass, uint64(0), wit.Some{Value: bg}, nil, nil, nil)); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	if _, err := call("[method]gpu-render-pass-encoder.draw", pass, uint64(vertices), nil, nil, nil); err != nil {
-		return err
+		return 0, err
 	}
 	if _, err := call("[method]gpu-render-pass-encoder.end", pass); err != nil {
-		return err
+		return 0, err
 	}
-	if err := s.d.submit(enc); err != nil {
-		return err
+	cb, err := handle(call("[method]gpu-command-encoder.finish", enc, nil))
+	if err != nil {
+		return 0, err
 	}
-	_, err = callIn(contextModule, "[method]context.present", s.ctx)
+	drops.add("gpu-command-buffer", cb)
+	return cb, nil
+}
+
+// PendingFrame is a frame BeginFrame started: the host submits it and presents
+// it on its own while the guest works, and Ready says when that is over.
+type PendingFrame struct {
+	s     *Surface
+	done  *uint32 // the host stores 1 here when the frame is over
+	drops dropList
+}
+
+// BeginFrame is Frame without the wait (an extension of this host, not in
+// wasi-gfx; engine#160). It encodes the frame, then asks the host to submit and
+// present it and returns at once: the browser may hold the submit and the
+// present for hundreds of milliseconds, a span in which a guest that must keep
+// a sound output fed has to run. Poll Ready (it reads the guest's own memory,
+// it is not a host call, so the host thread the browser holds does not delay
+// it) and call End; no other call that uses the device may come in between.
+func (s *Surface) BeginFrame(p *RenderPipeline, buffers []*Buffer, clear [4]float64, vertices uint32) (*PendingFrame, error) {
+	f := &PendingFrame{s: s, done: new(uint32)}
+	cb, err := s.record(&f.drops, p, buffers, clear, vertices)
+	if err != nil {
+		f.drops.run()
+		return nil, err
+	}
+	if _, err := callIn(contextModule, "[method]context.submit-present-begin", s.ctx, s.d.queue, []any{cb}, uint32(uintptr(unsafe.Pointer(f.done)))); err != nil {
+		f.drops.run()
+		return nil, err
+	}
+	return f, nil
+}
+
+// Ready reports whether the host is done with the frame (End will not wait).
+func (f *PendingFrame) Ready() bool { return atomic.LoadUint32(f.done) == 1 }
+
+// End waits for the end of the frame and releases what it held. It returns the
+// failure of the submit or of the present, if any.
+func (f *PendingFrame) End() error {
+	_, err := callIn(contextModule, "[method]context.submit-present-end", f.s.ctx)
+	f.drops.run()
 	return err
 }

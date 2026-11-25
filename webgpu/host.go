@@ -160,6 +160,8 @@ type procState struct {
 	h    *Handles
 	s    Session
 	refs int
+
+	present presentSlot // the begun submit-present, if any
 }
 
 func (sh *sharedState) acquire(p *wasi.Proc, m *Module) *procState {
@@ -267,6 +269,12 @@ func (in *instance) Call(fn int, args []uint64, m wasi.Memory) wasi.Result {
 			return trapResult(err)
 		}
 		return in.lowerResult(e.fn, v, args, m)
+	}
+	switch e.name {
+	case callSubmitPresentBegin:
+		return in.ps.present.begin(in.s, vals, m)
+	case callSubmitPresentEnd:
+		return in.ps.present.end()
 	}
 	if in.s.Async(e.name) {
 		done := make(chan struct{})
